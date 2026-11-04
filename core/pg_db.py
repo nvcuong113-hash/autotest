@@ -63,6 +63,23 @@ def init_db(db_path: str | None = None) -> None:
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS application_mappings (
+          id BIGSERIAL PRIMARY KEY,
+          project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          profile_id TEXT NOT NULL,
+          page_id TEXT NOT NULL DEFAULT '',
+          target_id TEXT NOT NULL,
+          locator_by TEXT NOT NULL,
+          locator_value TEXT NOT NULL,
+          locator_name TEXT DEFAULT '',
+          exact INTEGER NOT NULL DEFAULT 1,
+          verified INTEGER NOT NULL DEFAULT 0,
+          evidence TEXT DEFAULT '',
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(project_id, profile_id, page_id, target_id)
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS test_runs (
           id BIGSERIAL PRIMARY KEY,
           project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -86,6 +103,7 @@ def init_db(db_path: str | None = None) -> None:
         """,
         "CREATE INDEX IF NOT EXISTS idx_req_project ON requirements(project_id)",
         "CREATE INDEX IF NOT EXISTS idx_case_project ON test_cases(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mapping_project_profile ON application_mappings(project_id, profile_id)",
         "CREATE INDEX IF NOT EXISTS idx_result_run ON test_results(run_id)",
         "ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS source_ref TEXT DEFAULT ''",
         "ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS automation_level TEXT NOT NULL DEFAULT 'manual'",
@@ -287,6 +305,85 @@ def update_test_case(case_id: int, fields: dict[str, Any], db_path: str | None =
             f"UPDATE test_cases SET {','.join(columns)} WHERE id=%s",
             (*values, case_id),
         )
+
+
+def list_application_mappings(
+    project_id: int,
+    profile_id: str,
+    db_path: str | None = None,
+) -> list[dict[str, Any]]:
+    if db_path:
+        raise ValueError("Không dùng db_path khi cấu hình PostgreSQL.")
+    with connect() as conn:
+        return list(conn.execute(
+            """SELECT * FROM application_mappings
+               WHERE project_id=%s AND profile_id=%s
+               ORDER BY page_id,target_id""",
+            (project_id, profile_id),
+        ).fetchall())
+
+
+def save_application_mappings(
+    project_id: int,
+    profile_id: str,
+    mappings: list[dict[str, Any]],
+    db_path: str | None = None,
+) -> int:
+    if db_path:
+        raise ValueError("Không dùng db_path khi cấu hình PostgreSQL.")
+    allowed = {"css", "role", "label", "placeholder", "text"}
+    saved = 0
+    with connect() as conn:
+        for item in mappings:
+            page_id = str(item.get("page_id") or "").strip()
+            target_id = str(item.get("target_id") or "").strip()
+            strategy = str(item.get("locator_by") or "").strip().lower()
+            value = str(item.get("locator_value") or "").strip()
+            if not target_id or target_id.startswith("auth."):
+                raise ValueError("Target nghiệp vụ không hợp lệ hoặc đang cố ghi đè target xác thực.")
+            if strategy not in allowed or not value:
+                raise ValueError(f"Mapping '{target_id}' thiếu locator hợp lệ.")
+            conn.execute(
+                """INSERT INTO application_mappings
+                   (project_id,profile_id,page_id,target_id,locator_by,locator_value,
+                    locator_name,exact,verified,evidence,updated_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP)
+                   ON CONFLICT(project_id,profile_id,page_id,target_id) DO UPDATE SET
+                    locator_by=EXCLUDED.locator_by,
+                    locator_value=EXCLUDED.locator_value,
+                    locator_name=EXCLUDED.locator_name,
+                    exact=EXCLUDED.exact,
+                    verified=EXCLUDED.verified,
+                    evidence=EXCLUDED.evidence,
+                    updated_at=CURRENT_TIMESTAMP""",
+                (
+                    project_id, profile_id, page_id, target_id, strategy, value,
+                    str(item.get("locator_name") or "").strip(),
+                    int(bool(item.get("exact", True))),
+                    int(bool(item.get("verified", False))),
+                    str(item.get("evidence") or "").strip(),
+                ),
+            )
+            saved += 1
+    return saved
+
+
+def delete_application_mapping(
+    project_id: int,
+    profile_id: str,
+    page_id: str,
+    target_id: str,
+    db_path: str | None = None,
+) -> int:
+    if db_path:
+        raise ValueError("Không dùng db_path khi cấu hình PostgreSQL.")
+    with connect() as conn:
+        cursor = conn.execute(
+            """DELETE FROM application_mappings
+               WHERE project_id=%s AND profile_id=%s AND page_id=%s AND target_id=%s""",
+            (project_id, profile_id, page_id or "", target_id),
+        )
+        return int(cursor.rowcount)
 
 
 def create_run(project_id: int, base_url: str, db_path: str | None = None) -> int:
