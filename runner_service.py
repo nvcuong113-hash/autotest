@@ -88,6 +88,9 @@ class RunnerHandler(BaseHTTPRequestHandler):
             peak_before = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
             print(f"[RUNNER] {path} started; process_peak_rss_mb={peak_before}", flush=True)
             if path == "/inspect":
+                application_profile = load_application_profile(
+                    str(payload.get("application_profile_id") or "oap-meta")
+                )
                 result = inspect_page(
                     target_url=str(payload.get("target_url") or ""),
                     base_url=str(payload.get("base_url") or ""),
@@ -95,6 +98,7 @@ class RunnerHandler(BaseHTTPRequestHandler):
                     username=str(payload.get("username") or ""),
                     password=str(payload.get("password") or ""),
                     authenticate=bool(payload.get("authenticate")),
+                    application_profile=application_profile,
                 )
                 screenshot_path = str(result.pop("screenshot_path", "") or "")
                 if screenshot_path and Path(screenshot_path).is_file():
