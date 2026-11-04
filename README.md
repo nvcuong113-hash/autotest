@@ -25,6 +25,18 @@ Create a JSON file under `application_profiles/<profile-id>.json` following `app
 
 The same SRS parser, semantic test model, action registry, execution engine and reporting functions are reused by every profile.
 
+### Mapping Coverage and Automation Assessment
+
+The UI provides a project-level **Mapping & Coverage** workspace.
+
+- It assesses every Test Case against the selected Application Profile and shows READY/BLOCKED, recommended automation level, missing page/target mappings, manual placeholders and missing assertions.
+- Project mappings are persisted in the database (SQLite locally, Neon PostgreSQL when configured) and scoped by project + Application Profile + page + semantic target.
+- A page-specific mapping can be reused by every Test Case that references the same semantic target. A Shared mapping can be reused across pages for common headers, search boxes, navigation and other reviewed components.
+- Inspector input/button suggestions can prefill a locator. A human must explicitly confirm that the locator has been checked on the correct staging screen before it is marked verified.
+- Re-assessment updates automation levels in bulk. Only READY cases with a real assertion become `automatable`; partial/unmapped cases remain blocked from execution.
+- Mapping a selector does not rewrite a manual placeholder into a business workflow. Manual Test Cases still need explicit semantic steps and assertions before they can be unlocked.
+- The execution screen offers only assessed, enabled and automatable cases. Previously BLOCKED cases can be selected again after mapping and re-assessment.
+
 ### Test Case automation levels
 
 - `automatable`: all required steps and assertions are available through verified mappings.
