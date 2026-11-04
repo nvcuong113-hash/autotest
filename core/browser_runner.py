@@ -793,8 +793,14 @@ def execute_case(case: dict[str, Any], page: Any, base_url: str,
                  username: str = "", password: str = "",
                  application_profile: dict[str, Any] | None = None) -> tuple[str, str, str]:
     steps = validate_steps_json(case.get("steps_json", "[]"))
+    automation_level = str(case.get("automation_level") or "manual").lower()
+    if automation_level == "manual":
+        raise ManualStepRequired("Test Case đang được phân loại thủ công. Hãy hoàn thiện mapping và đổi mức tự động hóa sau khi rà soát.")
     if any(s.get("action") == "manual" for s in steps):
         raise ManualStepRequired("Case contains a manual placeholder. Add verified browser steps before execution.")
+    assertion_actions = {"expect_visible", "expect_hidden", "expect_text", "expect_url", "assert_state"}
+    if not any(str(step.get("action") or "") in assertion_actions for step in steps):
+        raise ManualStepRequired("Test Case chưa có bước assertion để kiểm chứng kết quả thực tế; không được tính PASS.")
     variables = {"BASE_URL": base_url.rstrip("/"), "USERNAME": username, "PASSWORD": password}
     for index, step in enumerate(steps, 1):
         action = step["action"]
