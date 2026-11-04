@@ -725,3 +725,68 @@ def test_offline_case_generation_uses_stable_case_ids():
     second = generate_cases(requirements)
     assert [case["case_key"] for case in first] == [case["case_key"] for case in second]
     assert len({case["case_key"] for case in first}) == len(first)
+
+
+def test_postgres_init_db_serializes_schema_migrations(monkeypatch):
+    from core import pg_db
+
+    statements = []
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, statement, params=None):
+            statements.append((statement.strip(), params))
+            return None
+
+    monkeypatch.setattr(pg_db, "connect", lambda: FakeConnection())
+    pg_db.init_db()
+
+    assert statements
+    assert statements[0][0] == "SELECT pg_advisory_xact_lock(%s, %s)"
+    assert statements[0][1] == (20261104, 1)
+    assert any("ALTER TABLE test_cases" in statement for statement, _ in statements)
+
+
+def test_postgres_init_db_retries_full_transaction_after_deadlock(monkeypatch):
+    from psycopg.errors import DeadlockDetected
+    from core import pg_db
+
+    attempts = []
+    lock_calls = []
+
+    class FakeConnection:
+        def __init__(self, attempt):
+            self.attempt = attempt
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, statement, params=None):
+            normalized = statement.strip()
+            if normalized.startswith("SELECT pg_advisory_xact_lock"):
+                lock_calls.append(self.attempt)
+            elif normalized.startswith("CREATE TABLE") and self.attempt == 1:
+                raise DeadlockDetected("simulated deadlock")
+            return None
+
+    def fake_connect():
+        attempt = len(attempts) + 1
+        attempts.append(attempt)
+        return FakeConnection(attempt)
+
+    monkeypatch.setattr(pg_db, "connect", fake_connect)
+    monkeypatch.setattr(pg_db.time, "sleep", lambda _seconds: None)
+
+    pg_db.init_db()
+
+    assert attempts == [1, 2]
+    # Each retry opens a new transaction and acquires the lock before DDL.
+    assert lock_calls == [1, 2]
