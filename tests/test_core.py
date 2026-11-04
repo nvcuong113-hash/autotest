@@ -548,3 +548,90 @@ def test_gemini_test_design_uses_semantic_target_and_not_selector(monkeypatch):
     assert cases[0]["automation_level"] == "partially_automatable"
     assert cases[0]["steps"][1]["target"] == "guarantee.create_button"
     assert not any("selector" in step for step in cases[0]["steps"])
+
+
+def test_sqlite_persists_structured_requirement_metadata_and_automation_level(tmp_path):
+    import json
+    from core.db import (
+        init_db, create_project, save_requirements, list_requirements,
+        add_test_cases, list_test_cases,
+    )
+
+    db_path = str(tmp_path / "autotest.sqlite3")
+    init_db(db_path)
+    project_id = create_project("Reusable profile test", "Test DB migrations", db_path=db_path)
+    save_requirements(project_id, [{
+        "req_key": "REQ-001",
+        "title": "Create guarantee",
+        "description": "User can create a guarantee draft",
+        "source": "BRD.docx",
+        "metadata_json": json.dumps({
+            "actor": "RM",
+            "business_rules": ["Amount must be positive"],
+            "acceptance_criteria": ["Draft is created"],
+            "source_ref": "Section 3.3",
+        }),
+    }], db_path=db_path)
+    requirement = list_requirements(project_id, db_path=db_path)[0]
+    assert json.loads(requirement["metadata_json"])["actor"] == "RM"
+    add_test_cases(project_id, [{
+        "case_key": "TC-001",
+        "req_key": "REQ-001",
+        "title": "Create valid draft",
+        "steps": [{"action": "manual", "description": "Map UI target"}],
+        "automation_level": "partially_automatable",
+    }], db_path=db_path)
+    case = list_test_cases(project_id, db_path=db_path)[0]
+    assert case["automation_level"] == "partially_automatable"
+
+
+def test_profile_authentication_reuses_existing_browser_context_session():
+    from core.application_profile import load_application_profile
+    from core.authentication import ensure_authenticated
+
+    class FakeResponse:
+        status = 200
+
+    class FakeRequest:
+        def get(self, url, timeout):
+            assert url.endswith("/api/v1/auth/me")
+            return FakeResponse()
+
+    class FakeContext:
+        request = FakeRequest()
+
+        def new_page(self):
+            raise AssertionError("Should not open the login page when the session is already valid")
+
+    result = ensure_authenticated(
+        FakeContext(),
+        load_application_profile("oap-meta"),
+        "https://oap-meta-staging.ovigroup.vn",
+    )
+    assert result["authenticated"] is True
+    assert result["status"] == "ALREADY_AUTHENTICATED"
+
+
+def test_profile_authentication_rejects_cross_origin_session_probe():
+    from core.authentication import AuthenticationError, ensure_authenticated
+
+    profile = {
+        "authentication": {
+            "strategy": "web_form",
+            "login_path": "/login",
+            "username_target": "auth.username",
+            "password_target": "auth.password",
+            "submit_target": "auth.submit",
+            "session_probe": {"path": "//evil.example/auth/me", "success_status": 200},
+        }
+    }
+
+    class FakeContext:
+        pass
+
+    try:
+        ensure_authenticated(FakeContext(), profile, "https://oap-meta-staging.ovigroup.vn")
+    except AuthenticationError as exc:
+        assert "session_probe path" in str(exc)
+    else:
+        raise AssertionError("Cross-origin session probes must be rejected")
