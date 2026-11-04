@@ -2,22 +2,41 @@ from __future__ import annotations
 
 import json
 import os
+import traceback
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
 
-from core.ai_generator import generate_cases_with_ai
-from core.browser_runner import inspect_page, run_suite
-from core.db import (add_test_cases, create_project, init_db, list_projects, list_requirements,
-                    list_results, list_runs, list_test_cases, save_requirements, update_test_case)
-from core.srs_parser import parse_srs
-from core.test_generator import generate_cases, validate_steps_json
-from core.suite_catalog import import_guarantee_suite, load_guarantee_suite
-
+# Show an immediate message before loading the rest of the application.
 st.set_page_config(page_title="AutoTest | Nền tảng kiểm thử", page_icon="🧪", layout="wide")
-init_db()
-Path("artifacts").mkdir(exist_ok=True)
+_boot_message = st.empty()
+_boot_message.info("AutoTest đang khởi tạo các thành phần...")
+print("[AUTOTEST_BOOT] app.py started", flush=True)
+
+try:
+    import pandas as pd
+
+    from core.ai_generator import generate_cases_with_ai
+    from core.browser_runner import inspect_page, run_suite
+    from core.db import (
+        add_test_cases, create_project, init_db, list_projects, list_requirements,
+        list_results, list_runs, list_test_cases, save_requirements, update_test_case,
+    )
+    from core.srs_parser import parse_srs
+    from core.test_generator import generate_cases, validate_steps_json
+    from core.suite_catalog import import_guarantee_suite, load_guarantee_suite
+
+    print("[AUTOTEST_BOOT] imports completed", flush=True)
+    init_db()
+    Path("artifacts").mkdir(exist_ok=True)
+    print("[AUTOTEST_BOOT] database initialized", flush=True)
+except Exception as exc:
+    print("[AUTOTEST_BOOT] startup failed: " + repr(exc), flush=True)
+    _boot_message.error("AutoTest không thể khởi tạo. Chi tiết lỗi ở bên dưới:")
+    st.code(traceback.format_exc(), language="python")
+    st.stop()
+
+_boot_message.empty()
 
 st.markdown("""<style>
 .block-container{padding-top:1.5rem;max-width:1500px}
