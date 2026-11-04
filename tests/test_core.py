@@ -371,3 +371,41 @@ def test_read_only_inspection_keeps_requested_business_url():
     assert _inspection_start_url(
         target, "https://oap-meta-staging.ovigroup.vn", False
     ) == target
+
+
+
+def test_page_readiness_does_not_confuse_auth_shell_loading_with_loaded_module():
+    from core.browser_runner import _assess_page_readiness
+
+    result = _assess_page_readiness(
+        {
+            "final_url":"https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
+            "body_text_preview":"OAP Meta Loading... My Tasks Approvals Discussions Alerts Me",
+            "main_text_preview":"Loading...",
+            "loading_indicator_count":1,
+            "table_count":0,
+            "data_row_count":0,
+        },
+        "https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
+    )
+    assert result["ready_candidate"] is False
+    assert result["state"] == "BUSINESS_PAGE_LOADING"
+
+
+def test_page_readiness_accepts_stable_business_table_content():
+    from core.browser_runner import _assess_page_readiness
+
+    result = _assess_page_readiness(
+        {
+            "final_url":"https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
+            "body_text_preview":"OAP Meta Quản lý bảo lãnh Danh sách bảo lãnh",
+            "main_text_preview":"Quản lý bảo lãnh Danh sách bảo lãnh Mã bảo lãnh Trạng thái",
+            "loading_indicator_count":0,
+            "table_count":1,
+            "data_row_count":3,
+            "headings":[{"text":"Quản lý bảo lãnh"}],
+        },
+        "https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
+    )
+    assert result["ready_candidate"] is True
+    assert result["state"] == "BUSINESS_CONTENT_CANDIDATE"
