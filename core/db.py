@@ -29,7 +29,8 @@ def init_db(db_path: str | None = None) -> None:
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
           req_key TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL,
-          source TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          source TEXT DEFAULT '', metadata_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(project_id, req_key)
         );
         CREATE TABLE IF NOT EXISTS test_cases (
@@ -39,7 +40,8 @@ def init_db(db_path: str | None = None) -> None:
           case_key TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
           test_type TEXT NOT NULL DEFAULT 'Functional', priority TEXT NOT NULL DEFAULT 'Medium',
           preconditions TEXT DEFAULT '', steps_json TEXT NOT NULL DEFAULT '[]',
-          expected_result TEXT DEFAULT '', source_ref TEXT DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
+          expected_result TEXT DEFAULT '', source_ref TEXT DEFAULT '',
+          automation_level TEXT NOT NULL DEFAULT 'manual', enabled INTEGER NOT NULL DEFAULT 1,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
@@ -61,10 +63,15 @@ def init_db(db_path: str | None = None) -> None:
         CREATE INDEX IF NOT EXISTS idx_case_project ON test_cases(project_id);
         CREATE INDEX IF NOT EXISTS idx_result_run ON test_results(run_id);
         """)
-        # Lightweight migration for SQLite databases created by earlier AutoTest versions.
-        columns = {row["name"] for row in conn.execute("PRAGMA table_info(test_cases)")}
-        if "source_ref" not in columns:
+        # Lightweight migrations for databases created by earlier AutoTest versions.
+        req_columns = {row["name"] for row in conn.execute("PRAGMA table_info(requirements)")}
+        if "metadata_json" not in req_columns:
+            conn.execute("ALTER TABLE requirements ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
+        case_columns = {row["name"] for row in conn.execute("PRAGMA table_info(test_cases)")}
+        if "source_ref" not in case_columns:
             conn.execute("ALTER TABLE test_cases ADD COLUMN source_ref TEXT DEFAULT ''")
+        if "automation_level" not in case_columns:
+            conn.execute("ALTER TABLE test_cases ADD COLUMN automation_level TEXT NOT NULL DEFAULT 'manual'")
 
 
 def create_project(name: str, description: str = "", db_path: str | None = None) -> int:
@@ -89,10 +96,17 @@ def save_requirements(project_id: int, items: list[dict[str, Any]], db_path: str
             key, title, desc = (str(item.get(k) or "").strip() for k in ("req_key", "title", "description"))
             if not key or not title or not desc:
                 continue
-            conn.execute("""INSERT INTO requirements(project_id,req_key,title,description,source)
-                VALUES (?,?,?,?,?) ON CONFLICT(project_id,req_key) DO UPDATE SET
-                title=excluded.title,description=excluded.description,source=excluded.source""",
-                (project_id, key, title, desc, str(item.get("source") or "")))
+            metadata = item.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {name: item.get(name) for name in (
+                    "actor", "preconditions", "business_rules", "acceptance_criteria", "source_ref"
+                ) if item.get(name) not in (None, "", [])}
+            metadata_json = json.dumps(metadata, ensure_ascii=False)
+            conn.execute("""INSERT INTO requirements(project_id,req_key,title,description,source,metadata_json)
+                VALUES (?,?,?,?,?,?) ON CONFLICT(project_id,req_key) DO UPDATE SET
+                title=excluded.title,description=excluded.description,source=excluded.source,
+                metadata_json=excluded.metadata_json""",
+                (project_id, key, title, desc, str(item.get("source") or ""), metadata_json))
             saved += 1
     return saved
 
@@ -121,11 +135,12 @@ def add_test_cases(project_id: int, cases: list[dict[str, Any]], db_path: str | 
             steps = case.get("steps", [])
             steps_json = steps if isinstance(steps, str) else __import__("json").dumps(steps, ensure_ascii=False)
             cur = conn.execute("""INSERT OR IGNORE INTO test_cases
-                (project_id,requirement_id,case_key,title,test_type,priority,preconditions,steps_json,expected_result,source_ref)
-                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (project_id,requirement_id,case_key,title,test_type,priority,preconditions,steps_json,expected_result,source_ref,automation_level)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (project_id, req_ids.get(str(case.get("req_key") or "")), key, title,
                  str(case.get("test_type") or "Functional"), str(case.get("priority") or "Medium"),
-                 str(case.get("preconditions") or ""), steps_json, str(case.get("expected_result") or ""), str(case.get("source_ref") or "")))
+                 str(case.get("preconditions") or ""), steps_json, str(case.get("expected_result") or ""),
+                 str(case.get("source_ref") or ""), str(case.get("automation_level") or "manual")))
             saved += int(cur.rowcount > 0)
     return saved
 
@@ -138,7 +153,7 @@ def list_test_cases(project_id: int, db_path: str | None = None) -> list[dict[st
 
 
 def update_test_case(case_id: int, fields: dict[str, Any], db_path: str | None = None) -> None:
-    allowed = {"title", "test_type", "priority", "preconditions", "steps_json", "expected_result", "source_ref", "enabled"}
+    allowed = {"title", "test_type", "priority", "preconditions", "steps_json", "expected_result", "source_ref", "automation_level", "enabled"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return
