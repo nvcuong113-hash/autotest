@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import re
 import time
 from pathlib import Path
@@ -10,6 +11,30 @@ from core.db import create_run, finish_run, save_result
 from core.test_generator import validate_steps_json
 
 ARTIFACT_DIR = Path("artifacts")
+
+# Keep Chromium's process count and background services low on small cloud instances.
+CHROMIUM_ARGS = [
+    "--disable-dev-shm-usage",
+    "--disable-background-networking",
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-extensions",
+    "--disable-gpu",
+    "--disable-software-rasterizer",
+    "--disable-sync",
+    "--disable-default-apps",
+    "--disable-breakpad",
+    "--disable-component-update",
+    "--disable-features=Translate,BackForwardCache,MediaRouter",
+    "--renderer-process-limit=1",
+    "--no-zygote",
+    "--metrics-recording-only",
+    "--no-first-run",
+]
+
+
+def _launch_low_memory_browser(playwright: Any, headless: bool = True) -> Any:
+    return playwright.chromium.launch(headless=headless, args=CHROMIUM_ARGS)
 
 
 class ManualStepRequired(Exception):
@@ -217,11 +242,19 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
         return parsed_url._replace(query="", fragment="").geturl()
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=headless)
+        browser = _launch_low_memory_browser(playwright, headless)
         try:
-            context = browser.new_context(viewport={"width":1440,"height":1000})
+            context = browser.new_context(viewport={"width":1024,"height":768}, device_scale_factor=1, service_workers="block")
             page = context.new_page()
             page.set_default_timeout(8000)
+            # Static media does not affect DOM/selector discovery and can consume
+            # considerable memory while remote fonts/images are loading.
+            page.route(
+                "**/*",
+                lambda route: route.abort()
+                if route.request.resource_type in {"image", "font", "media"}
+                else route.continue_(),
+            )
 
             def on_response(response: Any) -> None:
                 try:
@@ -489,7 +522,7 @@ def run_suite(project_id: int, base_url: str, cases: list[dict[str, Any]],
                     context = page = None
                     screenshot_path = ""
                     try:
-                        context = browser.new_context(viewport={"width": 1440, "height": 900})
+                        context = browser.new_context(viewport={"width": 1024, "height": 768}, device_scale_factor=1, service_workers="block")
                         page = context.new_page()
                         page.set_default_timeout(7000)
                         status, message, screenshot_path = execute_case(case, page, base_url.strip(), username, password)
@@ -500,12 +533,13 @@ def run_suite(project_id: int, base_url: str, cases: list[dict[str, Any]],
                         try:
                             if page and not page.is_closed():
                                 screenshot_path = str(ARTIFACT_DIR / f"{case['case_key']}-failure.png")
-                                page.screenshot(path=screenshot_path, full_page=True, timeout=3000)
+                                page.screenshot(path=screenshot_path, full_page=False, timeout=2500)
                         except Exception:
                             screenshot_path = ""
                     finally:
                         if context:
                             context.close()
+                        gc.collect()
                     duration = time.perf_counter() - started
                     save_result(run_id, int(case["id"]), status, message, screenshot_path, duration)
                     results.append({"case_key": case["case_key"], "title": case["title"], "status": status,
