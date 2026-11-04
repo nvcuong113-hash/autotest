@@ -314,6 +314,25 @@ with tab_run:
                 st.error("Không mở được đường dẫn /login của OAP Meta: " + str(inspection.get("login_diagnostic", {}).get("error_type", "Lỗi điều hướng")))
             elif login_result == "SUBMISSION_ERROR":
                 st.error("Không thể gửi form đăng nhập: " + str(inspection.get("login_diagnostic", {}).get("error_type", "Lỗi trình duyệt")))
+            login_diag = inspection.get("login_diagnostic", {})
+            login_response = login_diag.get("login_api_response", {})
+            if login_diag.get("login_api_status") is not None or login_response:
+                with st.expander("Phản hồi API đăng nhập (đã ẩn thông tin nhạy cảm)", expanded=True):
+                    st.write("HTTP đăng nhập:", login_diag.get("login_api_status", "Không ghi nhận"))
+                    st.write("HTTP /auth/me gần nhất:", inspection.get("auth_me_latest_status", "Chưa có"))
+                    if login_response.get("message"):
+                        st.warning(str(login_response["message"]))
+                    if login_response.get("success") is not None:
+                        st.write("API success:", login_response["success"])
+                    if login_response.get("code") or login_response.get("error_code"):
+                        st.write("Mã lỗi:", login_response.get("error_code", login_response.get("code")))
+                    st.caption("Các trường response: " + ", ".join(login_response.get("response_keys", [])))
+                    storage = login_diag.get("storage_metadata", {})
+                    if storage:
+                        st.caption("Local storage keys: " + ", ".join(storage.get("local_storage_keys", [])))
+                        st.caption("Session storage keys: " + ", ".join(storage.get("session_storage_keys", [])))
+                    if login_diag.get("cookie_names"):
+                        st.caption("Cookie names: " + ", ".join(login_diag["cookie_names"]))
             st.caption("Trạng thái tài liệu: " + str(inspection.get("ready_state", "unknown")))
             frame_rows = inspection.get("frame_diagnostics", [])
             if frame_rows:
