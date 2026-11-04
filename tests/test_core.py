@@ -144,3 +144,30 @@ def test_evaluate_with_navigation_retry_does_not_hide_real_errors():
         assert "selector syntax" in str(exc)
     else:
         raise AssertionError("Non-navigation errors must not be swallowed")
+
+def test_classify_auth_state_from_login_redirect_and_401():
+    from core.browser_runner import _classify_auth_state
+
+    redirected = _classify_auth_state(
+        "https://oap-meta-staging.ovigroup.vn/login",
+        [{"url":"https://oap-meta-staging.ovigroup.vn/api/v1/auth/me","status":401}],
+        "",
+    )
+    assert redirected["authentication_required"] is True
+    assert redirected["authentication_pending"] is False
+    assert redirected["authentication_state"] == "LOGIN_REQUIRED"
+    assert redirected["auth_api_401"] is True
+    assert redirected["redirected_to_login"] is True
+
+
+def test_classify_auth_state_pending_without_login_redirect():
+    from core.browser_runner import _classify_auth_state
+
+    pending = _classify_auth_state(
+        "https://oap-meta-staging.ovigroup.vn/app/ccm",
+        [{"url":"https://oap-meta-staging.ovigroup.vn/api/v1/auth/me","status":202}],
+        "Checking authentication...",
+    )
+    assert pending["authentication_required"] is False
+    assert pending["authentication_pending"] is True
+    assert pending["authentication_state"] == "AUTH_PENDING"
