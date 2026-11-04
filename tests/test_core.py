@@ -699,3 +699,13 @@ def test_gemini_downgrades_unverified_targets_and_assertion_free_cases(monkeypat
     assert len(cases) == 1
     assert cases[0]["automation_level"] == "manual"
     assert any(step["action"] == "manual" for step in cases[0]["steps"])
+
+
+def test_oap_meta_profile_requires_workspace_initialization_after_auth():
+    from core.application_profile import load_application_profile
+
+    profile = load_application_profile("oap-meta")
+    readiness = profile["authentication"]["post_login_readiness"]["required_api"]
+    assert readiness["path_contains"] == "/api/v1/auth/set-workspace"
+    assert readiness["method"] == "POST"
+    assert readiness["status"] == 200
