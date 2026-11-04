@@ -262,3 +262,72 @@ def test_navigate_to_login_page_builds_first_party_login_url():
     result = _navigate_to_login_page(page, "https://oap-meta-staging.ovigroup.vn")
     assert page.goto_url == "https://oap-meta-staging.ovigroup.vn/login"
     assert result["result"] == "LOGIN_PAGE_READY"
+
+
+
+def test_auth_login_http_200_does_not_mean_authenticated_until_auth_me_200():
+    from core.browser_runner import _classify_auth_state
+
+    events = [
+        {
+            "url":"https://oap-meta-staging.ovigroup.vn/api/v1/auth/me",
+            "method":"GET",
+            "status":401,
+        },
+        {
+            "url":"https://oap-meta-staging.ovigroup.vn/api/v1/auth/login",
+            "method":"POST",
+            "status":200,
+        },
+    ]
+    result = _classify_auth_state(
+        "https://oap-meta-staging.ovigroup.vn/login",
+        events,
+        "Login Username Password",
+        login_attempted=True,
+    )
+    assert result["login_api_latest_status"] == 200
+    assert result["auth_me_latest_status"] == 401
+    assert result["authentication_required"] is True
+    assert result["authenticated"] is False
+    assert result["authentication_state"] == "LOGIN_NOT_CONFIRMED"
+
+
+def test_auth_me_200_after_login_confirms_session():
+    from core.browser_runner import _classify_auth_state
+
+    events = [
+        {"url":"https://oap-meta-staging.ovigroup.vn/api/v1/auth/me","method":"GET","status":401},
+        {"url":"https://oap-meta-staging.ovigroup.vn/api/v1/auth/login","method":"POST","status":200},
+        {"url":"https://oap-meta-staging.ovigroup.vn/api/v1/auth/me","method":"GET","status":200},
+    ]
+    result = _classify_auth_state(
+        "https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
+        events,
+        "Quản lý bảo lãnh",
+        login_attempted=True,
+    )
+    assert result["auth_api_success"] is True
+    assert result["authenticated"] is True
+    assert result["authentication_state"] == "AUTHENTICATED"
+
+
+def test_auth_login_response_summary_never_exposes_token_values():
+    from core.browser_runner import _auth_login_response_summary
+
+    result = _auth_login_response_summary(
+        200,
+        {
+            "success": False,
+            "message": "Invalid credentials for test.user@example.com",
+            "data": {"access_token": "super-secret-token", "refreshToken": "refresh-secret"},
+        },
+        "application/json",
+        True,
+    )
+    serialized = str(result)
+    assert result["success"] is False
+    assert result["message"] == "Invalid credentials for [email]"
+    assert result["token_fields_present"]["access_token"] is True
+    assert "super-secret-token" not in serialized
+    assert "refresh-secret" not in serialized
