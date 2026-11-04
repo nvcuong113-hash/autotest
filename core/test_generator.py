@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import hashlib
 import json
-import uuid
 from typing import Any
 
 
@@ -37,7 +37,9 @@ def generate_cases(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
         title = str(req.get("title") or req.get("description") or key)
         for kind, priority, pre, expected in PATTERNS:
             cases.append({
-                "case_key": f"TC-{uuid.uuid4().hex[:8].upper()}",
+                "case_key": "TC-" + hashlib.sha256(
+                    "|".join([key, kind, title]).encode("utf-8")
+                ).hexdigest()[:10].upper(),
                 "req_key": key,
                 "title": f"[{key}] {kind}: {title[:90]}",
                 "test_type": kind,
