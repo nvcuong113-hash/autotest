@@ -70,27 +70,92 @@ def _evaluate_with_navigation_retry(page: Any, script: str, attempts: int = 6) -
     raise RuntimeError("Không thể đọc DOM sau nhiều lần thử.")
 
 
-def _classify_auth_state(final_url: str, api_responses: list[dict[str, Any]], body_text: str) -> dict[str, Any]:
-    """Classify whether the inspected app is waiting for auth or has been redirected to login."""
+def _classify_auth_state(final_url: str, api_responses: list[dict[str, Any]], body_text: str,
+                        login_attempted: bool = False) -> dict[str, Any]:
+    """Classify login-required, MFA, pending, failed and authenticated states."""
     path = urlparse(final_url).path.rstrip("/").lower()
     login_path = path.endswith("/login") or path.endswith("/signin") or path.endswith("/sign-in")
-    auth_api_401 = any(
-        int(item.get("status", 0)) == 401
-        and ("/auth/me" in str(item.get("url", "")).lower() or "/api/v1/auth/" in str(item.get("url", "")).lower())
-        for item in api_responses
-    )
-    pending = "checking authentication" in body_text.lower() or "đang kiểm tra xác thực" in body_text.lower()
-    required = login_path or auth_api_401
-    state = "LOGIN_REQUIRED" if required else ("AUTH_PENDING" if pending else "AUTH_STATE_UNKNOWN")
+    auth_events = [item for item in api_responses if (
+        "/auth/me" in str(item.get("url", "")).lower()
+        or "/api/v1/auth/" in str(item.get("url", "")).lower()
+    )]
+    auth_api_401 = any(int(item.get("status", 0)) == 401 for item in auth_events)
+    auth_api_success = any(200 <= int(item.get("status", 0)) < 300 for item in auth_events)
+    body_lower = body_text.lower()
+    pending = "checking authentication" in body_lower or "đang kiểm tra xác thực" in body_lower
+    mfa_required = any(token in body_lower for token in ("mã xác thực", "verification code", "one-time password", "two-factor", "2fa", "otp"))
+    authenticated = auth_api_success and not login_path
+    required = not authenticated and (login_path or auth_api_401 or mfa_required)
+    if authenticated:
+        state = "AUTHENTICATED"
+    elif mfa_required:
+        state = "MFA_REQUIRED"
+    elif login_attempted and (login_path or auth_api_401):
+        state = "LOGIN_NOT_CONFIRMED"
+    elif login_path or auth_api_401:
+        state = "LOGIN_REQUIRED"
+    elif pending:
+        state = "AUTH_PENDING"
+    else:
+        state = "AUTH_STATE_UNKNOWN"
     return {
         "authentication_required": required,
-        "authentication_pending": pending and not required,
+        "authentication_pending": pending and not authenticated,
         "authentication_state": state,
         "auth_api_401": auth_api_401,
+        "auth_api_success": auth_api_success,
         "redirected_to_login": login_path,
+        "authenticated": authenticated,
+        "mfa_required": mfa_required,
     }
 
-def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[str, Any]:
+
+def _submit_username_password_login(page: Any, username: str, password: str) -> dict[str, Any]:
+    """Submit the visible username/password form without logging or returning credentials."""
+    if not username or not password:
+        return {"attempted": False, "result": "MISSING_CREDENTIALS"}
+
+    def first_visible(locators: list[Any]) -> Any | None:
+        for locator in locators:
+            try:
+                for index in range(min(locator.count(), 5)):
+                    candidate = locator.nth(index)
+                    if candidate.is_visible() and candidate.is_enabled():
+                        return candidate
+            except Exception:
+                continue
+        return None
+
+    username_field = first_visible([
+        page.get_by_label(re.compile(r"Tên đăng nhập|Username|Email", re.I)),
+        page.locator('input[autocomplete="username"]'),
+        page.locator('input[type="email"]'),
+        page.locator('input[name*="username" i], input[name*="email" i]'),
+        page.locator('input[placeholder*="Tên đăng nhập" i]'),
+        page.locator('input[type="text"]'),
+    ])
+    password_field = first_visible([
+        page.get_by_label(re.compile(r"Mật khẩu|Password", re.I)),
+        page.locator('input[autocomplete="current-password"]'),
+        page.locator('input[type="password"]'),
+    ])
+    login_button = first_visible([
+        page.get_by_role("button", name=re.compile(r"^\s*Đăng nhập\s*$", re.I)),
+        page.locator('button:has-text("Đăng nhập")'),
+        page.locator('button[type="submit"], input[type="submit"]'),
+    ])
+    if username_field is None or password_field is None or login_button is None:
+        return {"attempted": False, "result": "LOGIN_FORM_NOT_FOUND"}
+    try:
+        username_field.fill(username, timeout=8000)
+        password_field.fill(password, timeout=8000)
+        login_button.click(timeout=8000)
+        return {"attempted": True, "result": "SUBMITTED"}
+    except Exception as exc:
+        return {"attempted": True, "result": "SUBMISSION_ERROR", "error_type": type(exc).__name__}
+
+def inspect_page(target_url: str, base_url: str, headless: bool = True,
+                 username: str = "", password: str = "", authenticate: bool = False) -> dict[str, Any]:
     """Read-only page inspection with SPA/authentication polling and network diagnostics."""
     if not base_url.strip():
         raise ValueError("Cần cấu hình Base URL trước khi kiểm tra.")
@@ -228,6 +293,53 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[
             final_body = str(snapshot.get("body_text_preview", ""))
             final_url = snapshot.get("final_url") or (page.url if not page.is_closed() else "")
             auth_state = _classify_auth_state(final_url, api_responses, final_body)
+            login_diagnostic = {"attempted": False, "result": "NOT_REQUESTED"}
+            if authenticate and auth_state["authentication_required"]:
+                login_diagnostic = _submit_username_password_login(page, username, password)
+                if login_diagnostic["result"] == "SUBMITTED":
+                    auth_deadline = time.monotonic() + 18
+                    while time.monotonic() < auth_deadline:
+                        try:
+                            snapshot = _evaluate_with_navigation_retry(page, snapshot_script, attempts=2)
+                            final_body = str(snapshot.get("body_text_preview", ""))
+                            final_url = snapshot.get("final_url") or page.url
+                            auth_state = _classify_auth_state(final_url, api_responses, final_body, login_attempted=True)
+                            if auth_state["authenticated"] or auth_state["mfa_required"]:
+                                break
+                        except Exception:
+                            pass
+                        page.wait_for_timeout(650)
+                    if auth_state["authenticated"]:
+                        login_diagnostic["result"] = "AUTHENTICATED"
+                        try:
+                            page.goto(url, wait_until="commit", timeout=20000)
+                            auth_deadline = time.monotonic() + 12
+                            while time.monotonic() < auth_deadline:
+                                try:
+                                    snapshot = _evaluate_with_navigation_retry(page, snapshot_script, attempts=2)
+                                    final_body = str(snapshot.get("body_text_preview", ""))
+                                    final_url = snapshot.get("final_url") or page.url
+                                    auth_state = _classify_auth_state(final_url, api_responses, final_body)
+                                    if final_body and not auth_state["authentication_pending"]:
+                                        break
+                                except Exception:
+                                    pass
+                                page.wait_for_timeout(500)
+                        except Exception as exc:
+                            navigation_errors.append(f"Không mở lại được màn hình sau đăng nhập: {type(exc).__name__}")
+                    elif auth_state["mfa_required"]:
+                        login_diagnostic["result"] = "MFA_REQUIRED"
+                    else:
+                        login_diagnostic["result"] = "LOGIN_NOT_CONFIRMED"
+            elif authenticate and not auth_state["authentication_required"]:
+                login_diagnostic["result"] = "LOGIN_NOT_NEEDED"
+            elif authenticate and (not username or not password):
+                login_diagnostic["result"] = "MISSING_CREDENTIALS"
+
+            final_body = str(snapshot.get("body_text_preview", ""))
+            final_url = snapshot.get("final_url") or (page.url if not page.is_closed() else "")
+            auth_state = _classify_auth_state(final_url, api_responses, final_body,
+                                              login_attempted=login_diagnostic.get("attempted", False))
 
             # Inspect each frame separately: enterprise SSO pages may render controls in an iframe.
             frame_diagnostics: list[dict[str, Any]] = []
@@ -281,6 +393,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[
                 "title":snapshot.get("title", ""),
                 "ready_state":snapshot.get("ready_state", "unknown"),
                 **auth_state,
+                "login_diagnostic":login_diagnostic,
                 "frame_diagnostics":frame_diagnostics,
                 "headings":snapshot.get("headings", []),
                 "forms":snapshot.get("forms", []),
