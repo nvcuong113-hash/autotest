@@ -790,3 +790,51 @@ def test_postgres_init_db_retries_full_transaction_after_deadlock(monkeypatch):
     assert attempts == [1, 2]
     # Each retry opens a new transaction and acquires the lock before DDL.
     assert lock_calls == [1, 2]
+
+
+def test_runner_request_serializes_datetime_and_preserves_decimal(monkeypatch):
+    import json
+    from datetime import date, datetime, timezone
+    from decimal import Decimal
+    from core import runner_client
+
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"ok": true}'
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = request.data.decode("utf-8")
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setenv("RUNNER_URL", "https://runner.example.test")
+    monkeypatch.setenv("RUNNER_API_TOKEN", "test-token")
+    monkeypatch.setattr(runner_client.urllib.request, "urlopen", fake_urlopen)
+
+    created_at = datetime(2026, 11, 4, 15, 18, 30, tzinfo=timezone.utc)
+    due_date = date(2026, 12, 31)
+    payload = {
+        "cases": [{
+            "created_at": created_at,
+            "steps_json": '[{"action":"navigate"}]',
+            "test_data": {"amount": Decimal("123456789.123400")},
+            "due_date": due_date,
+        }]
+    }
+
+    result = runner_client._runner_request("/run", payload, timeout=30)
+    decoded = json.loads(captured["body"])
+
+    assert result == {"ok": True}
+    assert decoded["cases"][0]["created_at"] == created_at.isoformat()
+    assert decoded["cases"][0]["due_date"] == due_date.isoformat()
+    assert decoded["cases"][0]["test_data"]["amount"] == "123456789.123400"
+    assert captured["timeout"] == 30
