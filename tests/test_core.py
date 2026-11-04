@@ -51,3 +51,26 @@ def test_database_requirement_to_case_traceability(tmp_path):
     saved_cases = list_test_cases(project_id, db_path=db)
     assert len(saved_cases) == 4
     assert all(row["req_key"] == "FR-001" for row in saved_cases)
+
+
+
+def test_builtin_guarantee_suite_import_and_traceability(tmp_path):
+    from core.db import create_project, init_db, list_requirements, list_test_cases
+    from core.suite_catalog import import_guarantee_suite, load_guarantee_suite
+
+    db = str(tmp_path / "guarantee-suite.sqlite3")
+    init_db(db)
+    project_id = create_project("CCM Guarantee", db_path=db)
+    suite = load_guarantee_suite()
+    assert len(suite["test_cases"]) >= 60
+
+    imported = import_guarantee_suite(project_id, db_path=db)
+    assert imported["requirement_count"] == len(suite["requirements"])
+    assert imported["case_count"] == len(suite["test_cases"])
+
+    saved_requirements = list_requirements(project_id, db_path=db)
+    saved_cases = list_test_cases(project_id, db_path=db)
+    assert len(saved_requirements) == len(suite["requirements"])
+    assert len(saved_cases) == len(suite["test_cases"])
+    assert all(case["req_key"] for case in saved_cases)
+    assert all(case["source_ref"] for case in saved_cases)

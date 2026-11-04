@@ -39,7 +39,7 @@ def init_db(db_path: str | None = None) -> None:
           case_key TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
           test_type TEXT NOT NULL DEFAULT 'Functional', priority TEXT NOT NULL DEFAULT 'Medium',
           preconditions TEXT DEFAULT '', steps_json TEXT NOT NULL DEFAULT '[]',
-          expected_result TEXT DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
+          expected_result TEXT DEFAULT '', source_ref TEXT DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
@@ -61,6 +61,10 @@ def init_db(db_path: str | None = None) -> None:
         CREATE INDEX IF NOT EXISTS idx_case_project ON test_cases(project_id);
         CREATE INDEX IF NOT EXISTS idx_result_run ON test_results(run_id);
         """)
+        # Lightweight migration for SQLite databases created by earlier AutoTest versions.
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(test_cases)")}
+        if "source_ref" not in columns:
+            conn.execute("ALTER TABLE test_cases ADD COLUMN source_ref TEXT DEFAULT ''")
 
 
 def create_project(name: str, description: str = "", db_path: str | None = None) -> int:
@@ -112,11 +116,11 @@ def add_test_cases(project_id: int, cases: list[dict[str, Any]], db_path: str | 
             steps = case.get("steps", [])
             steps_json = steps if isinstance(steps, str) else __import__("json").dumps(steps, ensure_ascii=False)
             cur = conn.execute("""INSERT OR IGNORE INTO test_cases
-                (project_id,requirement_id,case_key,title,test_type,priority,preconditions,steps_json,expected_result)
-                VALUES (?,?,?,?,?,?,?,?,?)""",
+                (project_id,requirement_id,case_key,title,test_type,priority,preconditions,steps_json,expected_result,source_ref)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (project_id, req_ids.get(str(case.get("req_key") or "")), key, title,
                  str(case.get("test_type") or "Functional"), str(case.get("priority") or "Medium"),
-                 str(case.get("preconditions") or ""), steps_json, str(case.get("expected_result") or "")))
+                 str(case.get("preconditions") or ""), steps_json, str(case.get("expected_result") or ""), str(case.get("source_ref") or "")))
             saved += int(cur.rowcount > 0)
     return saved
 
@@ -129,7 +133,7 @@ def list_test_cases(project_id: int, db_path: str | None = None) -> list[dict[st
 
 
 def update_test_case(case_id: int, fields: dict[str, Any], db_path: str | None = None) -> None:
-    allowed = {"title", "test_type", "priority", "preconditions", "steps_json", "expected_result", "enabled"}
+    allowed = {"title", "test_type", "priority", "preconditions", "steps_json", "expected_result", "source_ref", "enabled"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return

@@ -13,6 +13,7 @@ from core.db import (add_test_cases, create_project, init_db, list_projects, lis
                     list_results, list_runs, list_test_cases, save_requirements, update_test_case)
 from core.srs_parser import parse_srs
 from core.test_generator import generate_cases, validate_steps_json
+from core.suite_catalog import import_guarantee_suite, load_guarantee_suite
 
 st.set_page_config(page_title="AutoTest | QA Platform", page_icon="🧪", layout="wide")
 init_db()
@@ -117,6 +118,20 @@ with tab_srs:
 
 with tab_cases:
     st.subheader("Generate test cases")
+    with st.expander("Import curated suite: CCM — Bank Guarantee Management", expanded=False):
+        suite_meta = load_guarantee_suite()
+        st.write("Source: **" + suite_meta["source_version"] + "** · "
+                 + str(len(suite_meta["requirements"])) + " requirement groups · "
+                 + str(len(suite_meta["test_cases"])) + " test cases")
+        st.caption("Các case được biên soạn theo BRD và đang để bước manual. Sau khi xác minh màn hình/selector, chỉnh bước JSON để Playwright thực thi.")
+        if st.button("Import CCM Guarantee test suite", type="primary", key=f"import_guarantee_suite_{pid}"):
+            try:
+                imported = import_guarantee_suite(pid)
+                st.success("Đã nạp " + str(imported["requirement_count"]) + " requirement và "
+                           + str(imported["case_count"]) + " test case mới. Case đã có sẽ không bị nhân bản.")
+                st.rerun()
+            except Exception as exc:
+                st.error("Không thể nạp bộ test: " + str(exc))
     if requirements:
         req_keys = [r["req_key"] for r in requirements]
         selected_req = st.multiselect("Requirements to cover", req_keys, default=req_keys)
@@ -150,6 +165,7 @@ with tab_cases:
             priority = col2.selectbox("Priority", priorities, index=priorities.index(case["priority"]) if case["priority"] in priorities else 2)
             pre = st.text_area("Preconditions", value=case["preconditions"])
             expected = st.text_area("Expected result", value=case["expected_result"])
+            st.caption("BRD traceability: " + (case.get("source_ref") or "Not specified"))
             try:
                 steps_default = json.dumps(json.loads(case["steps_json"]), ensure_ascii=False, indent=2)
             except json.JSONDecodeError:
@@ -160,7 +176,7 @@ with tab_cases:
                 try:
                     validate_steps_json(steps)
                     update_test_case(case["id"], {"title":title,"test_type":kind,"priority":priority,
-                        "preconditions":pre,"expected_result":expected,"steps_json":steps,"enabled":int(enabled)})
+                        "preconditions":pre,"expected_result":expected,"steps_json":steps,"enabled":int(enabled),"source_ref":case.get("source_ref","")})
                     st.success("Test case saved.")
                     st.rerun()
                 except Exception as exc:
