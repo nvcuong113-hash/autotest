@@ -265,9 +265,27 @@ with tab_run:
             status_col.write("**Mã phản hồi HTTP:** " + str(inspection.get("http_status") or "Không có phản hồi"))
             title_col.write("**Tiêu đề trang:** " + str(inspection.get("title") or "(trống)"))
             st.caption("URL cuối cùng: " + inspection.get("final_url", ""))
-            if inspection.get("authentication_pending"):
-                st.warning("OAP Meta vẫn ở trạng thái “Checking authentication...”. Trình duyệt kiểm thử chưa có phiên đăng nhập OAP Meta; cần hoàn tất bước xác thực trước khi đọc màn hình nghiệp vụ. Inspector hiện chỉ thu thập chẩn đoán, chưa tự đăng nhập.")
+            if inspection.get("authentication_required"):
+                st.error("OAP Meta yêu cầu đăng nhập. Inspector đã phát hiện chuyển hướng tới trang Login hoặc API xác thực trả 401. Chưa thể kiểm tra màn hình Bảo lãnh cho đến khi có phiên đăng nhập hợp lệ.")
+            elif inspection.get("authentication_pending"):
+                st.warning("OAP Meta vẫn đang kiểm tra xác thực. Chờ hệ thống hoàn tất xác thực trước khi đọc màn hình nghiệp vụ.")
+            st.caption("Trạng thái xác thực: " + str(inspection.get("authentication_state", "UNKNOWN")))
             st.caption("Trạng thái tài liệu: " + str(inspection.get("ready_state", "unknown")))
+            frame_rows = inspection.get("frame_diagnostics", [])
+            if frame_rows:
+                with st.expander("Các frame / vùng đăng nhập nhúng", expanded=True):
+                    for frame in frame_rows:
+                        st.markdown("**Frame " + str(frame.get("frame_index", "")) + "** · " + str(frame.get("url", "")))
+                        if frame.get("inspection_error"):
+                            st.caption(frame["inspection_error"])
+                        if frame.get("body_text_preview"):
+                            st.text(frame["body_text_preview"])
+                        if frame.get("inputs"):
+                            st.write("Trường nhập trong frame")
+                            st.dataframe(pd.DataFrame(frame["inputs"]).rename(columns={"index":"STT","tag":"Thẻ","type":"Kiểu","id":"ID","name":"Tên","placeholder":"Gợi ý nhập","aria_label":"Nhãn","disabled":"Vô hiệu hóa"}), use_container_width=True, hide_index=True)
+                        if frame.get("buttons"):
+                            st.write("Nút trong frame")
+                            st.dataframe(pd.DataFrame(frame["buttons"]).rename(columns={"index":"STT","text":"Nội dung nút","aria_label":"Nhãn","type":"Kiểu"}), use_container_width=True, hide_index=True)
             api_rows = inspection.get("api_responses", [])
             if api_rows:
                 with st.expander("Các request API/XHR của OAP Meta", expanded=True):
