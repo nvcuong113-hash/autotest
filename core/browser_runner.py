@@ -80,7 +80,7 @@ def _classify_auth_state(final_url: str, api_responses: list[dict[str, Any]], bo
         or "/api/v1/auth/" in str(item.get("url", "")).lower()
     )]
     auth_api_401 = any(int(item.get("status", 0)) == 401 for item in auth_events)
-    auth_api_success = any(200 <= int(item.get("status", 0)) < 300 for item in auth_events)
+    auth_api_success = any(int(item.get("status", 0)) == 200 for item in auth_events)
     body_lower = body_text.lower()
     pending = "checking authentication" in body_lower or "đang kiểm tra xác thực" in body_lower
     mfa_required = any(token in body_lower for token in ("mã xác thực", "verification code", "one-time password", "two-factor", "2fa", "otp"))
