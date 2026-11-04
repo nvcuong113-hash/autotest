@@ -63,18 +63,42 @@ def load_application_profile(profile_id: str) -> dict[str, Any]:
 def get_profile_mapping_summary(profile: dict[str, Any]) -> dict[str, int]:
     shared = profile.get("shared_targets", {}) if isinstance(profile.get("shared_targets"), dict) else {}
     pages = profile.get("pages", {}) if isinstance(profile.get("pages"), dict) else {}
+    shared_business = [
+        target for target in shared.values()
+        if isinstance(target, dict) and target.get("purpose") != "authentication"
+    ]
     page_targets = [
         target
         for page in pages.values()
         if isinstance(page, dict)
         for target in (page.get("targets", {}) or {}).values()
     ]
-    all_targets = list(shared.values()) + page_targets
-    verified = sum(1 for item in all_targets if isinstance(item, dict) and item.get("verified") is True)
-    pending = sum(1 for item in all_targets if not isinstance(item, dict) or item.get("verified") is not True)
+    business_targets = shared_business + page_targets
+    verified_business = sum(
+        1 for item in business_targets
+        if isinstance(item, dict) and item.get("verified") is True
+    )
+    verified_auth = sum(
+        1 for item in shared.values()
+        if isinstance(item, dict)
+        and item.get("purpose") == "authentication"
+        and item.get("verified") is True
+    )
+    pending_pages = sum(
+        1 for page in pages.values()
+        if isinstance(page, dict)
+        and str(page.get("mapping_status") or "").lower() not in {"mapped", "verified", "ready"}
+    )
+    pending_targets = sum(
+        1 for item in business_targets
+        if not isinstance(item, dict) or item.get("verified") is not True
+    )
     return {
         "page_count": len(pages),
-        "target_count": len(all_targets),
-        "verified_target_count": verified,
-        "unmapped_or_unverified_count": pending,
+        "target_count": len(business_targets),
+        "verified_target_count": verified_business,
+        "verified_business_target_count": verified_business,
+        "verified_auth_target_count": verified_auth,
+        "unmapped_or_unverified_count": pending_targets,
+        "unmapped_page_count": pending_pages,
     }
