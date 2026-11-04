@@ -92,7 +92,8 @@ with st.sidebar:
         st.success("Browser Runner: đã cấu hình dịch vụ riêng")
     else:
         st.error("Browser Runner chưa được cấu hình. Không chạy Playwright trực tiếp trong Web Service 512 MB.")
-    st.caption("Cấu hình kiểm thử trình duyệt")    base_url = st.text_input("Địa chỉ hệ thống (Base URL)", placeholder="https://staging.example.com")
+    st.caption("Cấu hình kiểm thử trình duyệt")
+    base_url = st.text_input("Địa chỉ hệ thống (Base URL)", placeholder="https://staging.example.com")
     username = st.text_input("Tài khoản kiểm thử", key="test_username")
     password = st.text_input("Mật khẩu kiểm thử", type="password", key="test_password")
     headless = st.checkbox("Chạy trình duyệt ẩn", value=True)
