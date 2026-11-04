@@ -409,3 +409,142 @@ def test_page_readiness_accepts_stable_business_table_content():
     )
     assert result["ready_candidate"] is True
     assert result["state"] == "BUSINESS_CONTENT_CANDIDATE"
+
+
+def test_gemini_provider_status_and_json_parsing(monkeypatch):
+    from core.ai_provider import get_ai_status, parse_json_response, GeminiProvider
+
+    monkeypatch.setenv("AI_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-a-real-secret")
+    status = get_ai_status()
+    assert status.provider == "gemini"
+    assert status.model == "gemini-3.5-flash-lite"
+    assert status.configured is True
+    assert GeminiProvider().model == "gemini-3.5-flash-lite"
+    assert parse_json_response('{"ok":true}') == {"ok": True}
+    assert parse_json_response('```json\\n{"ok":true}\\n```') == {"ok": True}
+
+
+def test_gemini_provider_requires_google_key_not_openai(monkeypatch):
+    from core.ai_provider import AIProviderError, GeminiProvider, get_ai_status
+
+    monkeypatch.setenv("AI_PROVIDER", "gemini")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "unused-openai-key")
+    assert get_ai_status().configured is False
+    try:
+        GeminiProvider()
+    except AIProviderError as exc:
+        assert "GEMINI_API_KEY" in str(exc)
+    else:
+        raise AssertionError("Gemini must require its own API key")
+
+
+def test_application_profile_registry_loads_oap_meta():
+    from core.application_profile import (
+        get_profile_mapping_summary, list_application_profiles, load_application_profile,
+    )
+
+    assert "oap-meta" in {item["profile_id"] for item in list_application_profiles()}
+    profile = load_application_profile("oap-meta")
+    assert profile["authentication"]["session_probe"]["path"] == "/api/v1/auth/me"
+    assert profile["pages"]["ccm.guarantee.list"]["path"].endswith("TRM_GUARANTEE_LIST")
+    summary = get_profile_mapping_summary(profile)
+    assert summary["verified_target_count"] == 3
+    assert summary["page_count"] == 1
+
+
+def test_application_profile_never_guesses_unmapped_business_target():
+    from core.action_registry import TargetNotMappedError, resolve_semantic_locator
+    from core.application_profile import load_application_profile
+
+    class FakePage:
+        def locator(self, value):
+            return ("css", value)
+
+        def get_by_role(self, role, name=None, exact=True):
+            return ("role", role, name, exact)
+
+    profile = load_application_profile("oap-meta")
+    locator = resolve_semantic_locator(FakePage(), profile, "auth.username")
+    assert locator == ("css", "input[name='usernameOrEmail']")
+    try:
+        resolve_semantic_locator(FakePage(), profile, "guarantee.create_button", "ccm.guarantee.list")
+    except TargetNotMappedError as exc:
+        assert "chưa được khai báo" in str(exc)
+    else:
+        raise AssertionError("Unmapped business targets must not be guessed")
+
+
+def test_semantic_test_steps_are_validated_without_css_selector():
+    from core.test_generator import validate_steps_json
+
+    steps = [
+        {"action": "navigate", "page": "ccm.guarantee.list"},
+        {"action": "click", "target": "guarantee.create_button"},
+        {"action": "fill", "target": "guarantee.amount", "value": "${data.amount}"},
+        {"action": "expect_text", "target": "guarantee.status", "expected": "DRAFT"},
+    ]
+    assert validate_steps_json(steps) == steps
+    try:
+        validate_steps_json([{"action": "fill", "value": "100"}])
+    except ValueError as exc:
+        assert "semantic target" in str(exc)
+    else:
+        raise AssertionError("Semantic fill without target must be rejected")
+
+
+def test_gemini_requirement_extraction_assigns_internal_id_and_preserves_evidence(monkeypatch):
+    import json
+    import core.ai_generator as generator
+
+    class FakeProvider:
+        def generate_json(self, prompt, schema, max_output_tokens):
+            return {"requirements": [{
+                "req_key": "",
+                "title": "Tạo đề xuất bảo lãnh",
+                "description": "Người dùng có thể tạo đề xuất bảo lãnh.",
+                "actor": "RM",
+                "preconditions": ["Có quyền tạo"],
+                "business_rules": ["Giá trị phải lớn hơn 0"],
+                "acceptance_criteria": ["Sinh mã đề xuất"],
+                "source_ref": "Mục 3.3",
+            }]}
+
+    monkeypatch.setattr(generator, "get_ai_provider", lambda: FakeProvider())
+    result = generator.extract_requirements_with_ai("Yêu cầu tạo đề xuất bảo lãnh.", "BRD.docx")
+    assert len(result) == 1
+    assert result[0]["req_key"] == "REQ-001"
+    metadata = json.loads(result[0]["metadata_json"])
+    assert metadata["actor"] == "RM"
+    assert metadata["source_ref"] == "Mục 3.3"
+
+
+def test_gemini_test_design_uses_semantic_target_and_not_selector(monkeypatch):
+    import core.ai_generator as generator
+
+    class FakeProvider:
+        def generate_json(self, prompt, schema, max_output_tokens):
+            return {"test_cases": [{
+                "req_key": "BG-REQ-01",
+                "title": "Tạo đề xuất bảo lãnh hợp lệ",
+                "test_type": "Positive",
+                "priority": "High",
+                "preconditions": "Người dùng có quyền tạo",
+                "steps": [
+                    {"action": "navigate", "page": "ccm.guarantee.list"},
+                    {"action": "click", "target": "guarantee.create_button"},
+                    {"action": "fill", "target": "guarantee.amount", "value": "${data.amount}"},
+                ],
+                "expected_result": "Đề xuất được lưu ở trạng thái DRAFT.",
+                "source_ref": "Mục 3.3",
+                "automation_level": "partially_automatable",
+            }]}
+
+    monkeypatch.setattr(generator, "get_ai_provider", lambda: FakeProvider())
+    cases = generator.generate_cases_with_ai([{"req_key": "BG-REQ-01", "title": "Create guarantee"}])
+    assert len(cases) == 1
+    assert cases[0]["automation_level"] == "partially_automatable"
+    assert cases[0]["steps"][1]["target"] == "guarantee.create_button"
+    assert not any("selector" in step for step in cases[0]["steps"])
