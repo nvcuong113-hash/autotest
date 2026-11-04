@@ -221,6 +221,30 @@ with tab_srs:
             columns={"req_key":"Mã yêu cầu","title":"Tên yêu cầu",
                      "description":"Mô tả yêu cầu","source":"Tài liệu nguồn"})
         st.dataframe(req_view, use_container_width=True, hide_index=True)
+        with st.expander("Chi tiết phân tích yêu cầu: Actor, điều kiện, Business Rules và Acceptance Criteria"):
+            for requirement in requirements:
+                try:
+                    metadata = json.loads(requirement.get("metadata_json") or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    metadata = {}
+                if not isinstance(metadata, dict) or not metadata:
+                    continue
+                st.markdown("**" + str(requirement["req_key"]) + " — " + str(requirement["title"]) + "**")
+                if metadata.get("actor"):
+                    st.write("Actor:", metadata["actor"])
+                if metadata.get("preconditions"):
+                    st.write("Điều kiện tiên quyết:", " · ".join(map(str, metadata["preconditions"])))
+                if metadata.get("business_rules"):
+                    st.write("Business Rules:")
+                    for rule in metadata["business_rules"]:
+                        st.markdown("- " + str(rule))
+                if metadata.get("acceptance_criteria"):
+                    st.write("Acceptance Criteria:")
+                    for criterion in metadata["acceptance_criteria"]:
+                        st.markdown("- " + str(criterion))
+                if metadata.get("source_ref"):
+                    st.caption("Tham chiếu nguồn: " + str(metadata["source_ref"]))
+                st.divider()
     else:
         st.info("Tải tài liệu SRS lên để tạo danh sách yêu cầu nghiệp vụ.")
 
