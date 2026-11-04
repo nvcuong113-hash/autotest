@@ -101,19 +101,13 @@ def ensure_authenticated(
         deadline = time.monotonic() + max(5, min(timeout_seconds, 45))
         while time.monotonic() < deadline:
             session_ok = session_is_valid()
-            current_path = urlparse(page.url).path.rstrip("/").lower()
-            login_paths = {
-                str(auth.get("login_path") or "").rstrip("/").lower(),
-                "/login",
-                "/signin",
-                "/sign-in",
-            }
             required_api_ok = (
                 not required_path
                 or any(event["status"] == required_status for event in workspace_events)
             )
-            left_login_page = current_path not in login_paths
-            if session_ok and left_login_page and required_api_ok:
+            # Keep the auth page alive until profile-defined initialization completes.
+            # The caller will navigate to its own target page using this same context.
+            if session_ok and required_api_ok:
                 return {
                     "authenticated": True,
                     "status": "AUTHENTICATED",
