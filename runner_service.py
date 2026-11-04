@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from core.application_profile import load_application_profile
 from core.browser_runner import inspect_page, run_suite
 from core.db import init_db, mark_interrupted_runs
 
@@ -121,6 +122,9 @@ class RunnerHandler(BaseHTTPRequestHandler):
             if not DATABASE_URL:
                 self._send(503, {"error": "Browser Runner chưa được cấu hình DATABASE_URL."})
                 return
+            application_profile = load_application_profile(
+                str(payload.get("application_profile_id") or "oap-meta")
+            )
             result = run_suite(
                 project_id=int(payload["project_id"]),
                 base_url=str(payload["base_url"]),
@@ -128,6 +132,7 @@ class RunnerHandler(BaseHTTPRequestHandler):
                 username=str(payload.get("username") or ""),
                 password=str(payload.get("password") or ""),
                 headless=True,
+                application_profile=application_profile,
             )
             # Worker-local screenshot paths are not accessible to the frontend.
             for item in result.get("results", []):
