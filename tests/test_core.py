@@ -351,3 +351,23 @@ def test_low_memory_chromium_profile_caps_v8_heap():
     assert "--js-flags=--max-old-space-size=128" in CHROMIUM_ARGS
     assert "--renderer-process-limit=1" in CHROMIUM_ARGS
     assert "--disable-dev-shm-usage" in CHROMIUM_ARGS
+
+
+
+def test_authenticated_inspection_starts_at_login_to_avoid_loading_business_spa():
+    from core.browser_runner import _inspection_start_url
+
+    assert _inspection_start_url(
+        "https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
+        "https://oap-meta-staging.ovigroup.vn",
+        True,
+    ) == "https://oap-meta-staging.ovigroup.vn/login"
+
+
+def test_read_only_inspection_keeps_requested_business_url():
+    from core.browser_runner import _inspection_start_url
+
+    target = "https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST"
+    assert _inspection_start_url(
+        target, "https://oap-meta-staging.ovigroup.vn", False
+    ) == target
