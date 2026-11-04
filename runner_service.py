@@ -4,6 +4,7 @@ import base64
 import hmac
 import json
 import os
+import resource
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -36,11 +37,14 @@ class RunnerHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path.split("?", 1)[0] == "/health":
+            peak_rss_mb = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
             self._send(200, {
                 "ok": True,
                 "service": "autotest-browser-runner",
                 "database_configured": bool(DATABASE_URL),
                 "token_configured": bool(RUNNER_TOKEN),
+                "peak_process_rss_mb": peak_rss_mb,
+                "browser_job_active": _browser_job_lock.locked(),
             })
             return
         self._send(404, {"error": "Not found"})
@@ -80,6 +84,8 @@ class RunnerHandler(BaseHTTPRequestHandler):
             self._send(429, {"error": "Browser Runner đang xử lý một tác vụ khác. Thử lại sau."})
             return
         try:
+            peak_before = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+            print(f"[RUNNER] {path} started; process_peak_rss_mb={peak_before}", flush=True)
             if path == "/inspect":
                 result = inspect_page(
                     target_url=str(payload.get("target_url") or ""),
@@ -100,6 +106,8 @@ class RunnerHandler(BaseHTTPRequestHandler):
                             Path(screenshot_path).unlink(missing_ok=True)
                         except OSError:
                             pass
+                peak_after = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+                print(f"[RUNNER] inspect completed; process_peak_rss_mb={peak_after}", flush=True)
                 self._send(200, result)
                 return
 
@@ -124,11 +132,14 @@ class RunnerHandler(BaseHTTPRequestHandler):
             # Worker-local screenshot paths are not accessible to the frontend.
             for item in result.get("results", []):
                 item["screenshot_path"] = ""
+            peak_after = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+            print(f"[RUNNER] run completed; process_peak_rss_mb={peak_after}", flush=True)
             self._send(200, result)
         except ValueError as exc:
             self._send(400, {"error": str(exc)})
         except Exception as exc:
             # Never return exception strings; they may contain request details.
+            print(f"[RUNNER] {path} failed: {type(exc).__name__}", flush=True)
             self._send(500, {"error": f"Browser Runner failed ({type(exc).__name__})."})
         finally:
             _browser_job_lock.release()
