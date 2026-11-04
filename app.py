@@ -257,7 +257,7 @@ with tab_cases:
 with tab_run:
     runner_configured = bool(os.getenv("RUNNER_URL", "").strip() and os.getenv("RUNNER_API_TOKEN", ""))
     st.subheader("Kiểm tra giao diện hệ thống (chỉ đọc)")
-    with st.expander("Đọc cấu trúc màn hình Staging, không đăng nhập hoặc gửi biểu mẫu", expanded=True):
+    with st.expander("Đọc cấu trúc màn hình Staging (chỉ đăng nhập nếu bật tùy chọn)", expanded=True):
         inspect_url = st.text_input(
             "Địa chỉ màn hình cần kiểm tra",
             placeholder="https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
