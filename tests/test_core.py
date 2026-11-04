@@ -98,3 +98,49 @@ def test_resolve_inspection_url_rejects_different_host():
         assert "outside" in str(exc)
     else:
         raise AssertionError("Inspector must not navigate to a different host")
+
+
+def test_evaluate_with_navigation_retry_recovers_after_redirect():
+    from core.browser_runner import _evaluate_with_navigation_retry
+
+    class FakePage:
+        def __init__(self):
+            self.calls = 0
+
+        def evaluate(self, script):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("Execution context was destroyed, most likely because of a navigation")
+            return {"title": "Login", "ok": True}
+
+        def wait_for_load_state(self, state, timeout):
+            return None
+
+        def wait_for_timeout(self, milliseconds):
+            return None
+
+        def is_closed(self):
+            return False
+
+    page = FakePage()
+    result = _evaluate_with_navigation_retry(page, "() => document.title", attempts=3)
+    assert result == {"title": "Login", "ok": True}
+    assert page.calls == 2
+
+
+def test_evaluate_with_navigation_retry_does_not_hide_real_errors():
+    from core.browser_runner import _evaluate_with_navigation_retry
+
+    class FakePage:
+        def evaluate(self, script):
+            raise RuntimeError("selector syntax is invalid")
+
+        def is_closed(self):
+            return False
+
+    try:
+        _evaluate_with_navigation_retry(FakePage(), "() => 1")
+    except RuntimeError as exc:
+        assert "selector syntax" in str(exc)
+    else:
+        raise AssertionError("Non-navigation errors must not be swallowed")
