@@ -247,16 +247,23 @@ with tab_run:
             placeholder="https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
             key=f"inspect_url_{pid}",
         )
-        st.caption("Địa chỉ hệ thống ở thanh bên phải cùng tên miền. Công cụ chỉ mở trang và đọc DOM; không bấm nút, không gửi biểu mẫu.")
+        st.caption("Công cụ chỉ làm việc trong tên miền Base URL. Khi bật đăng nhập, tài khoản sẽ được dùng để điền form đăng nhập OAP Meta; không lưu vào SQLite và không ghi ra log.")
+        use_credentials_for_login = st.checkbox("Đăng nhập OAP Meta bằng tài khoản kiểm thử ở thanh bên", value=False, key=f"inspect_login_{pid}")
         if st.button("Kiểm tra màn hình và thu thập selector", key=f"inspect_btn_{pid}", type="primary"):
             if not base_url.strip():
                 st.error("Nhập địa chỉ gốc của hệ thống ở thanh bên, ví dụ https://oap-meta-staging.ovigroup.vn")
             elif not inspect_url.strip():
                 st.error("Nhập đầy đủ URL màn hình Staging cần kiểm tra.")
+            elif use_credentials_for_login and (not username.strip() or not password):
+                st.error("Đã bật đăng nhập nhưng chưa nhập đủ tài khoản và mật khẩu kiểm thử ở thanh bên.")
             else:
                 try:
-                    with st.spinner("Đang mở trang bằng Playwright và đọc cấu trúc giao diện..."):
-                        st.session_state[f"inspection_{pid}"] = inspect_page(inspect_url, base_url, headless=True)
+                    with st.spinner("Đang mở OAP Meta, kiểm tra xác thực và đọc cấu trúc giao diện..."):
+                        st.session_state[f"inspection_{pid}"] = inspect_page(
+                            inspect_url, base_url, headless=True,
+                            username=username, password=password,
+                            authenticate=use_credentials_for_login,
+                        )
                 except Exception as exc:
                     st.error(f"Không thể kiểm tra màn hình: {type(exc).__name__}: {exc}")
         inspection = st.session_state.get(f"inspection_{pid}")
@@ -270,6 +277,19 @@ with tab_run:
             elif inspection.get("authentication_pending"):
                 st.warning("OAP Meta vẫn đang kiểm tra xác thực. Chờ hệ thống hoàn tất xác thực trước khi đọc màn hình nghiệp vụ.")
             st.caption("Trạng thái xác thực: " + str(inspection.get("authentication_state", "UNKNOWN")))
+            login_result = inspection.get("login_diagnostic", {}).get("result", "NOT_REQUESTED")
+            if login_result == "AUTHENTICATED":
+                st.success("Đăng nhập OAP Meta thành công. Đã mở lại URL màn hình nghiệp vụ cần kiểm tra.")
+            elif login_result == "MFA_REQUIRED":
+                st.warning("OAP Meta yêu cầu thêm OTP hoặc xác thực nhiều lớp. Inspector chưa tự xử lý bước này.")
+            elif login_result == "LOGIN_NOT_CONFIRMED":
+                st.error("Đã gửi form đăng nhập nhưng chưa xác nhận được phiên đăng nhập. Kiểm tra thông tin test hoặc phản hồi xác thực.")
+            elif login_result == "LOGIN_FORM_NOT_FOUND":
+                st.error("Không tìm thấy đầy đủ trường Tên đăng nhập, Mật khẩu và nút Đăng nhập trong trang hiện tại.")
+            elif login_result == "MISSING_CREDENTIALS":
+                st.warning("Chưa nhập đủ thông tin tài khoản kiểm thử.")
+            elif login_result == "SUBMISSION_ERROR":
+                st.error("Không thể gửi form đăng nhập: " + str(inspection.get("login_diagnostic", {}).get("error_type", "Lỗi trình duyệt")))
             st.caption("Trạng thái tài liệu: " + str(inspection.get("ready_state", "unknown")))
             frame_rows = inspection.get("frame_diagnostics", [])
             if frame_rows:
