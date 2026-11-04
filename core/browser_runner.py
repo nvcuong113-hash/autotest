@@ -399,6 +399,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
     failed_requests: list[dict[str, Any]] = []
     console_errors: list[str] = []
     page_errors: list[str] = []
+    blocked_static_resources: list[dict[str, Any]] = []
     navigation_errors: list[str] = []
     from playwright.sync_api import sync_playwright
 
@@ -493,6 +494,12 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
 
             def on_request_failed(request: Any) -> None:
                 try:
+                    if request.resource_type in {"image", "font", "media"}:
+                        _append_limited(blocked_static_resources, {
+                            "resource_type": request.resource_type,
+                            "url": safe_url(request.url),
+                        }, 30)
+                        return
                     _append_limited(failed_requests, {"url":safe_url(request.url), "method":request.method,
                                             "resource_type":request.resource_type,
                                             "failure":str(request.failure or "Unknown failure")[:300]}, 30)
@@ -502,7 +509,10 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             def on_console(message: Any) -> None:
                 try:
                     if message.type == "error":
-                        _append_limited(console_errors, str(message.text)[:300], 20)
+                        message_text = str(message.text)
+                        if "Failed to load resource" in message_text or "net::ERR_FAILED" in message_text:
+                            return
+                        _append_limited(console_errors, message_text[:300], 20)
                 except Exception:
                     pass
 
@@ -636,12 +646,24 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             auth_state = _classify_auth_state(final_url, api_responses, final_body,
                                               login_attempted=login_diagnostic.get("attempted", False))
             if "page_readiness" not in locals():
-                snapshot, page_readiness = _wait_for_business_page(
-                    page, snapshot_script, url, timeout_seconds=18
-                )
-                final_body = str(snapshot.get("body_text_preview", ""))
-                final_url = snapshot.get("final_url") or page.url
-                auth_state = _classify_auth_state(final_url, api_responses, final_body)
+                if auth_state.get("authenticated") or not authenticate:
+                    snapshot, page_readiness = _wait_for_business_page(
+                        page, snapshot_script, url, timeout_seconds=18
+                    )
+                    final_body = str(snapshot.get("body_text_preview", ""))
+                    final_url = snapshot.get("final_url") or page.url
+                    auth_state = _classify_auth_state(final_url, api_responses, final_body)
+                else:
+                    page_readiness = {
+                        "ready": False,
+                        "state": "AUTH_NOT_CONFIRMED",
+                        "is_target_page": False,
+                        "loading_text_detected": False,
+                        "loading_indicator_count": 0,
+                        "table_count": 0,
+                        "data_row_count": 0,
+                        "main_text_length": 0,
+                    }
 
             # Inspect each frame separately: enterprise SSO pages may render controls in an iframe.
             frame_diagnostics: list[dict[str, Any]] = []
@@ -709,6 +731,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                 "document_responses":document_responses[-20:],
                 "api_responses":api_responses[-80:],
                 "failed_requests":failed_requests[-40:],
+                "blocked_static_resources":blocked_static_resources[-30:],
                 "console_errors":console_errors[-30:],
                 "page_errors":page_errors[-20:],
                 "navigation_errors":navigation_errors[-20:],
