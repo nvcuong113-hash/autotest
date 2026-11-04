@@ -106,8 +106,8 @@ def _classify_auth_state(final_url: str, api_responses: list[dict[str, Any]], bo
     )]
     def status_code(item: dict[str, Any]) -> int:
         raw = str(item.get("status", "")).strip()
-        match = re.search(r"\\b(\\d{3})\\b", raw)
-        return int(match.group(1)) if match else 0
+        digits = "".join(character for character in raw if character.isdigit())
+        return int(digits[:3]) if len(digits) >= 3 else 0
     auth_api_401 = any(status_code(item) == 401 for item in auth_events)
     auth_api_success = any(status_code(item) == 200 for item in auth_events)
     body_lower = body_text.lower()
