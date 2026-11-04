@@ -838,3 +838,221 @@ def test_runner_request_serializes_datetime_and_preserves_decimal(monkeypatch):
     assert decoded["cases"][0]["due_date"] == due_date.isoformat()
     assert decoded["cases"][0]["test_data"]["amount"] == "123456789.123400"
     assert captured["timeout"] == 30
+
+
+def test_project_mapping_merge_is_page_scoped_verified_and_cannot_override_auth():
+    from core.application_profile import ApplicationProfileError, merge_profile_mappings
+
+    base = {
+        "profile_id": "sample",
+        "shared_targets": {
+            "auth.username": {
+                "by": "css", "value": "input[name='username']", "verified": True,
+                "purpose": "authentication",
+            }
+        },
+        "pages": {"guarantee.list": {"path": "/guarantees", "targets": {}}},
+    }
+    merged = merge_profile_mappings(base, [{
+        "page_id": "guarantee.list",
+        "target_id": "guarantee.search.keyword",
+        "locator_by": "css",
+        "locator_value": "input[name='keyword']",
+        "verified": True,
+        "evidence": "Checked on staging",
+    }])
+    assert merged["pages"]["guarantee.list"]["targets"]["guarantee.search.keyword"]["verified"] is True
+    assert "guarantee.search.keyword" not in base["pages"]["guarantee.list"]["targets"]
+    assert merged["shared_targets"]["auth.username"]["purpose"] == "authentication"
+
+    try:
+        merge_profile_mappings(base, [{
+            "page_id": "",
+            "target_id": "auth.username",
+            "locator_by": "css",
+            "locator_value": "input[name='other']",
+            "verified": True,
+        }])
+    except ApplicationProfileError as exc:
+        assert "xác thực" in str(exc)
+    else:
+        raise AssertionError("Business mappings must not override authentication targets")
+
+
+def test_assessment_explains_manual_and_missing_mapping_without_false_ready():
+    from core.automation_assessment import assess_test_case
+
+    profile = {
+        "pages": {"guarantee.list": {"path": "/guarantees", "targets": {}}},
+        "shared_targets": {},
+    }
+    manual_case = {
+        "case_key": "TC-MANUAL",
+        "title": "Manual case",
+        "automation_level": "manual",
+        "steps_json": json.dumps([{"action": "manual", "description": "Map guarantee form"}]),
+    }
+    manual = assess_test_case(manual_case, profile)
+    assert manual["status"] == "BLOCKED"
+    assert manual["recommended_level"] == "manual"
+    assert any(reason["code"] == "MANUAL_STEP" for reason in manual["reasons"])
+    assert any(reason["code"] == "ASSERTION_MISSING" for reason in manual["reasons"])
+
+    unmapped_case = {
+        "case_key": "TC-UNMAPPED",
+        "title": "Unmapped case",
+        "automation_level": "manual",
+        "steps_json": json.dumps([
+            {"action": "navigate", "page": "guarantee.list"},
+            {"action": "click", "target": "guarantee.create"},
+            {"action": "expect_visible", "target": "guarantee.form"},
+        ]),
+    }
+    unmapped = assess_test_case(unmapped_case, profile)
+    assert unmapped["status"] == "BLOCKED"
+    assert unmapped["recommended_level"] == "partially_automatable"
+    assert "chưa được mapping" in unmapped["blocked_reason"]
+
+
+def test_assessment_unlocks_case_only_after_verified_mapping_and_assertion():
+    from core.application_profile import merge_profile_mappings
+    from core.automation_assessment import assess_test_case
+
+    profile = {
+        "pages": {"guarantee.list": {"path": "/guarantees", "targets": {}}},
+        "shared_targets": {},
+    }
+    case = {
+        "case_key": "TC-READY",
+        "title": "Search guarantees",
+        "automation_level": "manual",
+        "steps_json": json.dumps([
+            {"action": "navigate", "page": "guarantee.list"},
+            {"action": "fill", "target": "guarantee.search.keyword", "value": "BG-001"},
+            {"action": "expect_visible", "target": "guarantee.search.results"},
+        ]),
+    }
+    before = assess_test_case(case, profile)
+    assert before["status"] == "BLOCKED"
+    mapped = merge_profile_mappings(profile, [
+        {
+            "page_id": "guarantee.list",
+            "target_id": "guarantee.search.keyword",
+            "locator_by": "css",
+            "locator_value": "input[name='keyword']",
+            "verified": True,
+        },
+        {
+            "page_id": "guarantee.list",
+            "target_id": "guarantee.search.results",
+            "locator_by": "role",
+            "locator_value": "table",
+            "locator_name": "Danh sách bảo lãnh",
+            "verified": True,
+        },
+    ])
+    after = assess_test_case(case, mapped)
+    assert after["status"] == "READY"
+    assert after["recommended_level"] == "automatable"
+    assert after["blocked_reason"] == ""
+
+
+def test_mapping_coverage_counts_shared_target_usage_across_test_cases():
+    from core.application_profile import merge_profile_mappings
+    from core.automation_assessment import build_mapping_coverage
+
+    profile = {"pages": {"guarantee.list": {"path": "/guarantees", "targets": {}}}, "shared_targets": {}}
+    mappings = [{
+        "page_id": "guarantee.list",
+        "target_id": "guarantee.search.keyword",
+        "locator_by": "css",
+        "locator_value": "input[name='keyword']",
+        "verified": True,
+    }]
+    profile = merge_profile_mappings(profile, mappings)
+    cases = [
+        {"case_key": "TC-01", "steps_json": json.dumps([
+            {"action": "navigate", "page": "guarantee.list"},
+            {"action": "fill", "target": "guarantee.search.keyword", "value": "A"},
+        ])},
+        {"case_key": "TC-02", "steps_json": json.dumps([
+            {"action": "navigate", "page": "guarantee.list"},
+            {"action": "fill", "target": "guarantee.search.keyword", "value": "B"},
+        ])},
+    ]
+    coverage = build_mapping_coverage(cases, profile, mappings)
+    assert len(coverage) == 1
+    assert coverage[0]["verified"] is True
+    assert coverage[0]["usage_count"] == 2
+    assert coverage[0]["case_keys"] == "TC-01, TC-02"
+
+
+def test_sqlite_application_mappings_can_be_saved_listed_and_deleted(tmp_path):
+    from core.db import (
+        init_db, create_project, save_application_mappings,
+        list_application_mappings, delete_application_mapping,
+    )
+
+    db_path = str(tmp_path / "mapping.sqlite3")
+    init_db(db_path)
+    project_id = create_project("Mapping lifecycle", "Mapping test", db_path=db_path)
+    count = save_application_mappings(project_id, "oap-meta", [{
+        "page_id": "ccm.guarantee.list",
+        "target_id": "guarantee.search.keyword",
+        "locator_by": "css",
+        "locator_value": "input[name='f_keyword']",
+        "verified": True,
+        "evidence": "Inspector confirmed field name on Staging",
+    }], db_path=db_path)
+    assert count == 1
+    found = list_application_mappings(project_id, "oap-meta", db_path=db_path)
+    assert len(found) == 1
+    assert found[0]["target_id"] == "guarantee.search.keyword"
+    assert found[0]["verified"] == 1
+    assert delete_application_mapping(
+        project_id, "oap-meta", "ccm.guarantee.list",
+        "guarantee.search.keyword", db_path=db_path,
+    ) == 1
+    assert list_application_mappings(project_id, "oap-meta", db_path=db_path) == []
+
+
+def test_runner_client_sends_project_mapping_overrides(monkeypatch):
+    import json
+    from core import runner_client
+
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"run_id": 1, "status": "COMPLETED", "results": []}'
+
+    def fake_urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setenv("RUNNER_URL", "https://runner.example.test")
+    monkeypatch.setenv("RUNNER_API_TOKEN", "test-token")
+    monkeypatch.setattr(runner_client.urllib.request, "urlopen", fake_urlopen)
+
+    mapping = [{
+        "project_id": 7,
+        "profile_id": "oap-meta",
+        "page_id": "ccm.guarantee.list",
+        "target_id": "guarantee.search.keyword",
+        "locator_by": "css",
+        "locator_value": "input[name='f_keyword']",
+        "verified": 1,
+    }]
+    runner_client.run_suite(
+        7, "https://oap-meta-staging.ovigroup.vn",
+        [{"id": 1, "case_key": "TC-001", "title": "Test", "steps_json": "[]", "automation_level": "automatable"}],
+        application_profile_id="oap-meta",
+        profile_mappings=mapping,
+    )
+    assert captured["payload"]["profile_mappings"][0]["target_id"] == "guarantee.search.keyword"
