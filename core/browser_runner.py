@@ -37,6 +37,101 @@ def _resolve_url(value: str, base_url: str) -> str:
     return target
 
 
+
+def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[str, Any]:
+    """Read-only inspection of a page on the configured target host.
+
+    It does not fill fields, click buttons, submit forms or store browser cookies.
+    """
+    if not base_url.strip():
+        raise ValueError("Configure the Base URL before inspecting a page.")
+    url = _resolve_url(target_url.strip() or base_url.strip(), base_url.strip())
+    parsed = urlparse(url)
+    if parsed.username or parsed.password:
+        raise ValueError("Credentials are not allowed in the inspection URL.")
+
+    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    screenshot_path = str(ARTIFACT_DIR / f"page-inspection-{time.time_ns()}.png")
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=headless)
+        try:
+            context = browser.new_context(viewport={"width": 1440, "height": 1000})
+            page = context.new_page()
+            page.set_default_timeout(8000)
+            response = page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            page.wait_for_timeout(800)
+
+            inputs = page.locator("input, textarea, select").evaluate_all(
+                """els => els.map((el, i) => {
+                    const labels = el.labels ? Array.from(el.labels).map(x => (x.innerText || x.textContent || '').trim()).filter(Boolean) : [];
+                    const tag = el.tagName.toLowerCase();
+                    const type = (el.getAttribute('type') || (tag === 'textarea' ? 'textarea' : tag)).toLowerCase();
+                    const id = el.id || '';
+                    const name = el.getAttribute('name') || '';
+                    const placeholder = el.getAttribute('placeholder') || '';
+                    let suggested = '';
+                    if (id) suggested = '#' + CSS.escape(id);
+                    else if (name) suggested = tag + '[name="' + CSS.escape(name) + '"]';
+                    else if (placeholder) suggested = tag + '[placeholder="' + CSS.escape(placeholder) + '"]';
+                    return {index:i, tag, type, id, name, placeholder,
+                            aria_label:el.getAttribute('aria-label') || '',
+                            labels, required:!!el.required, disabled:!!el.disabled,
+                            suggested_selector:suggested};
+                })"""
+            )
+            buttons = page.locator("button, [role='button'], input[type='submit'], input[type='button']").evaluate_all(
+                """els => els.map((el, i) => {
+                    const tag = el.tagName.toLowerCase();
+                    const text = (el.innerText || el.value || el.textContent || '').trim().replace(/\\\\s+/g, ' ');
+                    const aria = el.getAttribute('aria-label') || '';
+                    const title = el.getAttribute('title') || '';
+                    const id = el.id || '';
+                    const name = el.getAttribute('name') || '';
+                    let suggested = '';
+                    if (id) suggested = '#' + CSS.escape(id);
+                    else if (name) suggested = tag + '[name="' + CSS.escape(name) + '"]';
+                    return {index:i, tag, text:text.slice(0,160), aria_label:aria, title,
+                            type:el.getAttribute('type') || '', disabled:!!el.disabled,
+                            suggested_selector:suggested};
+                })"""
+            )
+            links = page.locator("a[href]").evaluate_all(
+                """els => els.slice(0,100).map((el, i) => ({
+                    index:i, text:(el.innerText || el.textContent || '').trim().replace(/\\\\s+/g, ' ').slice(0,120),
+                    href:el.href
+                }))"""
+            )
+            headings = page.locator("h1, h2, h3").evaluate_all(
+                """els => els.slice(0,80).map(el => ({
+                    level:el.tagName.toLowerCase(),
+                    text:(el.innerText || el.textContent || '').trim().replace(/\\\\s+/g, ' ').slice(0,200)
+                })).filter(x => x.text)"""
+            )
+            forms = page.locator("form").evaluate_all(
+                """els => els.map((el, i) => ({
+                    index:i, method:(el.getAttribute('method') || 'get').toUpperCase(),
+                    action:el.action || '', id:el.id || '', name:el.getAttribute('name') || ''
+                }))"""
+            )
+            page.screenshot(path=screenshot_path, full_page=True, timeout=10000)
+            return {
+                "requested_url": url,
+                "final_url": page.url,
+                "http_status": response.status if response else None,
+                "title": page.title(),
+                "headings": headings,
+                "forms": forms,
+                "inputs": inputs,
+                "buttons": buttons,
+                "links": links,
+                "screenshot_path": screenshot_path,
+                "read_only": True,
+            }
+        finally:
+            browser.close()
+
 def execute_case(case: dict[str, Any], page: Any, base_url: str,
                  username: str = "", password: str = "") -> tuple[str, str, str]:
     steps = validate_steps_json(case.get("steps_json", "[]"))

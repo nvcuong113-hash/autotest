@@ -87,3 +87,14 @@ def test_builtin_guarantee_suite_import_and_traceability(tmp_path):
     second_cases = list_test_cases(second_project, db_path=db)
     assert len(second_cases) == len(suite["test_cases"])
     assert all(case["case_key"].startswith("P" + str(second_project) + "-BG-") for case in second_cases)
+
+
+
+def test_resolve_inspection_url_rejects_different_host():
+    from core.browser_runner import _resolve_url
+    try:
+        _resolve_url("https://different.example/login", "https://oap-meta-staging.ovigroup.vn")
+    except ValueError as exc:
+        assert "outside" in str(exc)
+    else:
+        raise AssertionError("Inspector must not navigate to a different host")

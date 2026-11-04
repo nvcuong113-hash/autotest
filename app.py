@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from core.ai_generator import generate_cases_with_ai
-from core.browser_runner import run_suite
+from core.browser_runner import inspect_page, run_suite
 from core.db import (add_test_cases, create_project, init_db, list_projects, list_requirements,
                     list_results, list_runs, list_test_cases, save_requirements, update_test_case)
 from core.srs_parser import parse_srs
@@ -185,6 +185,49 @@ with tab_cases:
         st.info("No test cases yet.")
 
 with tab_run:
+    st.subheader("Browser Inspector — read-only")
+    with st.expander("Inspect staging page structure without logging in or submitting forms", expanded=True):
+        inspect_url = st.text_input(
+            "Inspection URL",
+            placeholder="https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
+            key=f"inspect_url_{pid}",
+        )
+        st.caption("Base URL in the sidebar must be the same host. Inspector only opens the page and reads its DOM; it does not click or submit.")
+        if st.button("Inspect page and collect selectors", key=f"inspect_btn_{pid}", type="primary"):
+            if not base_url.strip():
+                st.error("Enter the site's origin in Base URL in the sidebar, e.g. https://oap-meta-staging.ovigroup.vn")
+            elif not inspect_url.strip():
+                st.error("Enter the full staging URL to inspect.")
+            else:
+                try:
+                    with st.spinner("Opening page with Playwright and reading visible page structure..."):
+                        st.session_state[f"inspection_{pid}"] = inspect_page(inspect_url, base_url, headless=True)
+                except Exception as exc:
+                    st.error(f"Page inspection failed: {type(exc).__name__}: {exc}")
+        inspection = st.session_state.get(f"inspection_{pid}")
+        if inspection:
+            status_col, title_col = st.columns([1,3])
+            status_col.metric("HTTP status", inspection.get("http_status") or "No response")
+            title_col.metric("Page title", inspection.get("title") or "(empty)")
+            st.caption("Final URL: " + inspection.get("final_url", ""))
+            st.write("**Headings**")
+            st.dataframe(pd.DataFrame(inspection.get("headings", [])), use_container_width=True, hide_index=True)
+            st.write("**Input fields and suggested selectors**")
+            st.dataframe(pd.DataFrame(inspection.get("inputs", [])), use_container_width=True, hide_index=True)
+            st.write("**Buttons and suggested selectors**")
+            st.dataframe(pd.DataFrame(inspection.get("buttons", [])), use_container_width=True, hide_index=True)
+            st.write("**Forms**")
+            st.dataframe(pd.DataFrame(inspection.get("forms", [])), use_container_width=True, hide_index=True)
+            if inspection.get("screenshot_path") and Path(inspection["screenshot_path"]).exists():
+                st.image(inspection["screenshot_path"], caption="Read-only page screenshot", use_container_width=True)
+            st.download_button(
+                "Download inspection JSON",
+                json.dumps(inspection, ensure_ascii=False, indent=2).encode("utf-8"),
+                file_name=f"page-inspection-{pid}.json",
+                mime="application/json",
+            )
+
+    st.divider()
     st.subheader("Playwright browser execution")
     st.warning("Only test systems you are authorized to access. Review selectors and test data. Avoid destructive tests and production data.")
     enabled_cases = [c for c in list_test_cases(pid) if c["enabled"]]
