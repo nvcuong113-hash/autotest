@@ -1,0 +1,55 @@
+{
+  "profile_id": "oap-meta",
+  "version": "1.0.0",
+  "name": "OAP Meta",
+  "description": "Application profile for OAP Meta web application. Business selectors must be verified and mapped per page; no guessed selectors are included.",
+  "default_base_url": "https://oap-meta-staging.ovigroup.vn",
+  "authentication": {
+    "strategy": "web_form",
+    "login_path": "/login",
+    "username_target": "auth.username",
+    "password_target": "auth.password",
+    "submit_target": "auth.submit",
+    "session_probe": {
+      "path": "/api/v1/auth/me",
+      "success_status": 200
+    }
+  },
+  "shared_targets": {
+    "auth.username": {
+      "by": "css",
+      "value": "input[name='usernameOrEmail']",
+      "verified": true,
+      "evidence": "Browser Inspector observed name=usernameOrEmail on OAP Meta login form."
+    },
+    "auth.password": {
+      "by": "css",
+      "value": "input[name='password']",
+      "verified": true,
+      "evidence": "Browser Inspector observed name=password on OAP Meta login form."
+    },
+    "auth.submit": {
+      "by": "role",
+      "value": "button",
+      "name": "Login",
+      "verified": true,
+      "evidence": "Browser Inspector observed a Login button on OAP Meta login form."
+    }
+  },
+  "pages": {
+    "ccm.guarantee.list": {
+      "name": "CCM - Danh sách bảo lãnh",
+      "module": "CCM",
+      "path": "/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
+      "targets": {},
+      "mapping_status": "needs_verified_mapping",
+      "notes": "Route is known. Business form/table selectors have not yet been verified and must be added after reviewing Inspector evidence."
+    }
+  },
+  "components": {},
+  "policies": {
+    "allow_cross_origin_navigation": false,
+    "require_verified_targets": true,
+    "block_destructive_actions_by_default": true
+  }
+}
