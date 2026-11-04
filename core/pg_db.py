@@ -131,6 +131,22 @@ def save_requirements(project_id: int, items: list[dict[str, Any]], db_path: str
             )
             if not key or not title or not desc:
                 continue
+            metadata_raw = item.get("metadata_json")
+            if isinstance(metadata_raw, str) and metadata_raw.strip():
+                try:
+                    metadata = json.loads(metadata_raw)
+                except json.JSONDecodeError:
+                    metadata = {}
+            elif isinstance(metadata_raw, dict):
+                metadata = metadata_raw
+            elif isinstance(item.get("metadata"), dict):
+                metadata = item["metadata"]
+            else:
+                metadata = {
+                    name: item.get(name) for name in (
+                        "actor", "preconditions", "business_rules", "acceptance_criteria", "source_ref"
+                    ) if item.get(name) not in (None, "", [])
+                }
             conn.execute(
                 """
                 INSERT INTO requirements(project_id,req_key,title,description,source,metadata_json)
@@ -143,22 +159,7 @@ def save_requirements(project_id: int, items: list[dict[str, Any]], db_path: str
                 """,
                 (
                     project_id, key, title, desc, str(item.get("source") or ""),
-                    json.dumps(
-                        (
-                            json.loads(item.get("metadata_json"))
-                            if isinstance(item.get("metadata_json"), str) and item.get("metadata_json").strip()
-                            else item.get("metadata_json")
-                            if isinstance(item.get("metadata_json"), dict)
-                            else item.get("metadata")
-                            if isinstance(item.get("metadata"), dict)
-                            else {
-                                name: item.get(name) for name in (
-                                    "actor", "preconditions", "business_rules", "acceptance_criteria", "source_ref"
-                                ) if item.get(name) not in (None, "", [])
-                            }
-                        ),
-                        ensure_ascii=False,
-                    ),
+                    json.dumps(metadata, ensure_ascii=False),
                 ),
             )
             saved += 1
