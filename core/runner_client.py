@@ -133,6 +133,7 @@ def run_suite(
     password: str = "",
     headless: bool = True,
     application_profile_id: str = "oap-meta",
+    profile_mappings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if len(cases) > 5:
         raise ValueError("Mỗi lượt chỉ chạy tối đa 5 Test Case để giới hạn tài nguyên.")
@@ -146,6 +147,7 @@ def run_suite(
             "password": password,
             "headless": True,
             "application_profile_id": application_profile_id,
+            "profile_mappings": profile_mappings or [],
         },
         timeout=1800,
     )
