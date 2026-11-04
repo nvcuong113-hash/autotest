@@ -635,3 +635,66 @@ def test_profile_authentication_rejects_cross_origin_session_probe():
         assert "session_probe path" in str(exc)
     else:
         raise AssertionError("Cross-origin session probes must be rejected")
+
+
+def test_execute_case_blocks_manual_level_and_assertion_free_cases():
+    from core.browser_runner import execute_case, ManualStepRequired
+
+    case_manual = {
+        "case_key": "TC-MANUAL",
+        "steps_json": json.dumps([{"action": "navigate", "page": "ccm.guarantee.list"}]),
+        "automation_level": "manual",
+    }
+    try:
+        execute_case(case_manual, object(), "https://example.test", application_profile={"pages": {}})
+    except ManualStepRequired as exc:
+        assert "thủ công" in str(exc)
+    else:
+        raise AssertionError("Manual cases must not execute or report PASS")
+
+    case_no_assert = {
+        "case_key": "TC-NO-ASSERT",
+        "steps_json": json.dumps([{"action": "navigate", "page": "ccm.guarantee.list"}]),
+        "automation_level": "automatable",
+    }
+    try:
+        execute_case(case_no_assert, object(), "https://example.test", application_profile={"pages": {}})
+    except ManualStepRequired as exc:
+        assert "assertion" in str(exc)
+    else:
+        raise AssertionError("Assertion-free cases must not report PASS")
+
+
+def test_gemini_downgrades_unverified_targets_and_assertion_free_cases(monkeypatch):
+    import core.ai_generator as generator
+
+    class FakeProvider:
+        def generate_json(self, prompt, schema, max_output_tokens):
+            return {"test_cases": [{
+                "req_key": "REQ-01",
+                "title": "Create guarantee",
+                "test_type": "Positive",
+                "priority": "High",
+                "preconditions": "",
+                "steps": [
+                    {"action": "navigate", "page": "ccm.guarantee.list"},
+                    {"action": "click", "target": "guarantee.create_button"},
+                ],
+                "expected_result": "A draft is created",
+                "source_ref": "Section 3",
+                "automation_level": "automatable",
+            }]}
+
+    monkeypatch.setattr(generator, "get_ai_provider", lambda: FakeProvider())
+    profile = {
+        "profile_id": "sample",
+        "pages": {"ccm.guarantee.list": {"path": "/guarantee", "targets": {}}},
+        "shared_targets": {},
+    }
+    cases = generator.generate_cases_with_ai(
+        [{"req_key": "REQ-01", "title": "Create guarantee"}],
+        application_profile=profile,
+    )
+    assert len(cases) == 1
+    assert cases[0]["automation_level"] == "manual"
+    assert any(step["action"] == "manual" for step in cases[0]["steps"])
