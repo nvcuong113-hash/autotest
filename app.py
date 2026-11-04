@@ -277,6 +277,14 @@ with tab_cases:
         priority_labels = {"Critical":"Nghiêm trọng","High":"Cao","Medium":"Trung bình","Low":"Thấp"}
         case_view["Loại kiểm thử"] = case_view["Loại kiểm thử"].map(lambda v: type_labels.get(v, v))
         case_view["Mức ưu tiên"] = case_view["Mức ưu tiên"].map(lambda v: priority_labels.get(v, v))
+        automation_labels = {
+            "automatable": "Tự động",
+            "partially_automatable": "Một phần",
+            "manual": "Thủ công",
+        }
+        case_view["Mức tự động hóa"] = case_view["Mức tự động hóa"].map(
+            lambda value: automation_labels.get(value, value)
+        )
         st.dataframe(case_view, use_container_width=True, hide_index=True)
         key = st.selectbox("Chọn Test Case cần chỉnh sửa", [c["case_key"] for c in cases])
         case = next(c for c in cases if c["case_key"] == key)
@@ -287,6 +295,19 @@ with tab_cases:
             col1,col2 = st.columns(2)
             kind = col1.selectbox("Loại kiểm thử", kinds, index=kinds.index(case["test_type"]) if case["test_type"] in kinds else 6, format_func=lambda v: {"Positive":"Tích cực","Negative":"Tiêu cực","Boundary":"Kiểm thử biên","Authorization":"Phân quyền","Integration":"Tích hợp","UI":"Giao diện","Functional":"Chức năng","Performance":"Hiệu năng"}.get(v, v))
             priority = col2.selectbox("Mức ưu tiên", priorities, index=priorities.index(case["priority"]) if case["priority"] in priorities else 2, format_func=lambda v: {"Critical":"Nghiêm trọng","High":"Cao","Medium":"Trung bình","Low":"Thấp"}.get(v, v))
+            automation_levels = ["automatable", "partially_automatable", "manual"]
+            automation_labels = {
+                "automatable": "Có thể tự động hóa",
+                "partially_automatable": "Tự động hóa một phần",
+                "manual": "Thủ công / cần mapping",
+            }
+            current_level = case.get("automation_level") or "manual"
+            automation_level = st.selectbox(
+                "Mức tự động hóa",
+                automation_levels,
+                index=automation_levels.index(current_level) if current_level in automation_levels else 2,
+                format_func=lambda value: automation_labels[value],
+            )
             pre = st.text_area("Điều kiện tiên quyết", value=case["preconditions"])
             expected = st.text_area("Kết quả mong đợi", value=case["expected_result"])
             st.caption("Tham chiếu BRD: " + (case.get("source_ref") or "Chưa xác định"))
@@ -300,7 +321,7 @@ with tab_cases:
                 try:
                     validate_steps_json(steps)
                     update_test_case(case["id"], {"title":title,"test_type":kind,"priority":priority,
-                        "preconditions":pre,"expected_result":expected,"steps_json":steps,"enabled":int(enabled),"source_ref":case.get("source_ref","")})
+                        "preconditions":pre,"expected_result":expected,"steps_json":steps,"automation_level":automation_level,"enabled":int(enabled),"source_ref":case.get("source_ref","")})
                     st.success("Đã lưu Test Case.")
                     st.rerun()
                 except Exception as exc:
