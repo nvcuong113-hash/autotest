@@ -194,6 +194,7 @@ if os.getenv("DATABASE_URL", "").strip():
         list_results,
         list_runs,
         list_test_cases,
+        mark_interrupted_runs,
         save_requirements,
         save_result,
         update_test_case,
