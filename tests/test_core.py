@@ -218,3 +218,47 @@ def test_runner_client_caps_browser_batch_at_five_cases():
         assert "5" in str(exc)
     else:
         raise AssertionError("Browser batches must be capped at five cases")
+
+
+
+def test_classify_auth_state_detects_auth_me_401_even_with_url_query():
+    from core.browser_runner import _classify_auth_state
+
+    result = _classify_auth_state(
+        "https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
+        [{"url":"https://oap-meta-staging.ovigroup.vn/api/v1/auth/me?ts=123","status":"401"}],
+        "Checking authentication...",
+    )
+    assert result["authentication_required"] is True
+    assert result["authentication_state"] == "LOGIN_REQUIRED"
+
+
+def test_navigate_to_login_page_builds_first_party_login_url():
+    from core.browser_runner import _navigate_to_login_page
+
+    class Locator:
+        def __init__(self, count):
+            self._count = count
+
+        def count(self):
+            return self._count
+
+    class FakePage:
+        def __init__(self):
+            self.url = "https://oap-meta-staging.ovigroup.vn/app/ccm"
+            self.goto_url = ""
+
+        def goto(self, url, wait_until, timeout):
+            self.goto_url = url
+            self.url = url
+
+        def locator(self, selector):
+            return Locator(1)
+
+        def wait_for_timeout(self, milliseconds):
+            return None
+
+    page = FakePage()
+    result = _navigate_to_login_page(page, "https://oap-meta-staging.ovigroup.vn")
+    assert page.goto_url == "https://oap-meta-staging.ovigroup.vn/login"
+    assert result["result"] == "LOGIN_PAGE_READY"
