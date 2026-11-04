@@ -103,7 +103,7 @@ with tab_srs:
             st.error(f"Không thể đọc tài liệu: {exc}")
     extracted = st.session_state.get("srs_items", [])
     if extracted:
-        st.write(f"Source: **{st.session_state.get('srs_name','Uploaded file')}**")
+        st.write(f"**Tài liệu nguồn:** {st.session_state.get('srs_name','Tệp đã tải lên')}")
         edited = st.data_editor(pd.DataFrame(extracted), use_container_width=True, hide_index=True,
             num_rows="dynamic", key=f"req_editor_{pid}",
             column_config={
@@ -121,8 +121,10 @@ with tab_srs:
     st.divider()
     st.subheader("Danh sách yêu cầu đã lưu")
     if requirements:
-        st.dataframe(pd.DataFrame(requirements)[["req_key","title","description","source"]],
-                     use_container_width=True, hide_index=True)
+        req_view = pd.DataFrame(requirements)[["req_key","title","description","source"]].rename(
+            columns={"req_key":"Mã yêu cầu","title":"Tên yêu cầu",
+                     "description":"Mô tả yêu cầu","source":"Tài liệu nguồn"})
+        st.dataframe(req_view, use_container_width=True, hide_index=True)
     else:
         st.info("Tải tài liệu SRS lên để tạo danh sách yêu cầu nghiệp vụ.")
 
@@ -162,8 +164,16 @@ with tab_cases:
     cases = list_test_cases(pid)
     st.subheader("Danh mục Test Case")
     if cases:
-        st.dataframe(pd.DataFrame(cases)[["case_key","req_key","title","test_type","priority"]],
-                     use_container_width=True, hide_index=True)
+        case_view = pd.DataFrame(cases)[["case_key","req_key","title","test_type","priority"]].rename(
+            columns={"case_key":"Mã Test Case","req_key":"Mã yêu cầu","title":"Tên Test Case",
+                     "test_type":"Loại kiểm thử","priority":"Mức ưu tiên"})
+        type_labels = {"Positive":"Tích cực","Negative":"Tiêu cực","Boundary":"Kiểm thử biên",
+                       "Authorization":"Phân quyền","Integration":"Tích hợp","UI":"Giao diện",
+                       "Functional":"Chức năng","Performance":"Hiệu năng"}
+        priority_labels = {"Critical":"Nghiêm trọng","High":"Cao","Medium":"Trung bình","Low":"Thấp"}
+        case_view["Loại kiểm thử"] = case_view["Loại kiểm thử"].map(lambda v: type_labels.get(v, v))
+        case_view["Mức ưu tiên"] = case_view["Mức ưu tiên"].map(lambda v: priority_labels.get(v, v))
+        st.dataframe(case_view, use_container_width=True, hide_index=True)
         key = st.selectbox("Chọn Test Case cần chỉnh sửa", [c["case_key"] for c in cases])
         case = next(c for c in cases if c["case_key"] == key)
         kinds = ["Positive","Negative","Boundary","Authorization","Integration","UI","Functional","Performance"]
@@ -171,8 +181,8 @@ with tab_cases:
         with st.form(f"edit_{case['id']}"):
             title = st.text_input("Tên Test Case", value=case["title"])
             col1,col2 = st.columns(2)
-            kind = col1.selectbox("Loại kiểm thử", kinds, index=kinds.index(case["test_type"]) if case["test_type"] in kinds else 6)
-            priority = col2.selectbox("Mức ưu tiên", priorities, index=priorities.index(case["priority"]) if case["priority"] in priorities else 2)
+            kind = col1.selectbox("Loại kiểm thử", kinds, index=kinds.index(case["test_type"]) if case["test_type"] in kinds else 6, format_func=lambda v: {"Positive":"Tích cực","Negative":"Tiêu cực","Boundary":"Kiểm thử biên","Authorization":"Phân quyền","Integration":"Tích hợp","UI":"Giao diện","Functional":"Chức năng","Performance":"Hiệu năng"}.get(v, v))
+            priority = col2.selectbox("Mức ưu tiên", priorities, index=priorities.index(case["priority"]) if case["priority"] in priorities else 2, format_func=lambda v: {"Critical":"Nghiêm trọng","High":"Cao","Medium":"Trung bình","Low":"Thấp"}.get(v, v))
             pre = st.text_area("Điều kiện tiên quyết", value=case["preconditions"])
             expected = st.text_area("Kết quả mong đợi", value=case["expected_result"])
             st.caption("Tham chiếu BRD: " + (case.get("source_ref") or "Chưa xác định"))
