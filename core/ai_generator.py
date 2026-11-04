@@ -150,7 +150,10 @@ def extract_requirements_with_ai(text: str, source: str = "") -> list[dict[str, 
     return extracted
 
 
-def generate_cases_with_ai(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def generate_cases_with_ai(
+    requirements: list[dict[str, Any]],
+    application_profile: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """Draft requirement-linked cases using semantic targets, not CSS/XPath selectors."""
     if not requirements:
         return []
@@ -171,6 +174,25 @@ def generate_cases_with_ai(requirements: list[dict[str, Any]]) -> list[dict[str,
     batches = [enriched_requirements[i:i + 5] for i in range(0, len(enriched_requirements), 5)]
     generated: list[dict[str, Any]] = []
     for batch_index, batch in enumerate(batches, start=1):
+        profile_context = {
+            "profile_id": str((application_profile or {}).get("profile_id") or ""),
+            "pages": {
+                page_id: {
+                    "path": str(page.get("path") or ""),
+                    "verified_targets": sorted(
+                        target_id for target_id, definition in (page.get("targets") or {}).items()
+                        if isinstance(definition, dict) and definition.get("verified") is True
+                    ),
+                    "mapping_status": str(page.get("mapping_status") or "unknown"),
+                }
+                for page_id, page in ((application_profile or {}).get("pages") or {}).items()
+                if isinstance(page, dict)
+            },
+            "verified_shared_targets": sorted(
+                target_id for target_id, definition in ((application_profile or {}).get("shared_targets") or {}).items()
+                if isinstance(definition, dict) and definition.get("verified") is True
+            ),
+        }
         prompt = {
             "task": "Design traceable software test cases from the supplied reviewed requirements.",
             "batch": f"{batch_index}/{len(batches)}",
@@ -186,8 +208,12 @@ def generate_cases_with_ai(requirements: list[dict[str, Any]]) -> list[dict[str,
                 "Use \u0024{data.field_name} placeholders instead of fabricated customer, contract, account or monetary data.",
                 "automation_level must be 'automatable', 'partially_automatable' or 'manual'. Mark automatable only if every needed target and assertion is explicit and mappable; otherwise choose partially_automatable or manual.",
                 "Allowed semantic actions: navigate, click, fill, select_option, check, uncheck, expect_visible, expect_hidden, expect_text, expect_url, wait_for, assert_state, manual.",
+                "Every non-manual action target must exist in the supplied Application Profile's verified target registry for that page or shared targets.",
+                "Do not invent page identifiers. Use only page IDs listed in the Application Profile.",
+                "Every automatable or partially_automatable case must include at least one assertion action: expect_visible, expect_hidden, expect_text, expect_url or assert_state.",
                 "A test case must have at least one step and a concrete expected_result. Avoid generic filler cases.",
             ],
+            "application_profile": profile_context,
             "requirements": batch,
         }
         data = provider.generate_json(json.dumps(prompt, ensure_ascii=False), TEST_CASE_SCHEMA, 8192)
@@ -204,14 +230,46 @@ def generate_cases_with_ai(requirements: list[dict[str, Any]]) -> list[dict[str,
                 steps = validate_steps_json(item.get("steps", []))
             except (ValueError, TypeError):
                 steps = [{"action": "manual", "description": "Rà soát và chuẩn hóa các bước nghiệp vụ trước khi thực thi."}]
-            # Guardrail: AI-generated cases are semantic. Reject selector leakage.
+            # Guardrail: AI-generated cases are semantic. Reject selector leakage
+            # and any target/page that is not verified in the selected Application Profile.
             if any(step.get("selector") or step.get("xpath") or step.get("css") for step in steps):
                 steps = [{"action": "manual", "description": "Bước sinh ra có chứa selector trực tiếp; cần chuyển sang semantic target đã được xác minh."}]
+            if application_profile:
+                pages = application_profile.get("pages") or {}
+                shared = application_profile.get("shared_targets") or {}
+                for step in steps:
+                    action = str(step.get("action") or "")
+                    page_id = str(step.get("page") or "")
+                    target_id = str(step.get("target") or "")
+                    if action == "navigate" and page_id not in pages:
+                        step.update({
+                            "action": "manual",
+                            "description": f"Page '{page_id}' chưa có trong Application Profile; cần mapping trước khi chạy.",
+                        })
+                        continue
+                    if target_id:
+                        page_targets = (pages.get(page_id) or {}).get("targets") or {}
+                        definition = page_targets.get(target_id) or shared.get(target_id)
+                        if not isinstance(definition, dict) or definition.get("verified") is not True:
+                            step.update({
+                                "action": "manual",
+                                "description": f"Target '{target_id}' chưa được xác minh trong Application Profile.",
+                            })
             automation_level = str(item.get("automation_level") or "manual").lower()
             if automation_level not in {"automatable", "partially_automatable", "manual"}:
                 automation_level = "manual"
-            if any(step.get("action") == "manual" for step in steps) and automation_level == "automatable":
-                automation_level = "partially_automatable"
+            if any(step.get("action") == "manual" for step in steps):
+                if all(step.get("action") == "manual" for step in steps):
+                    automation_level = "manual"
+                elif automation_level == "automatable":
+                    automation_level = "partially_automatable"
+            assertion_actions = {"expect_visible", "expect_hidden", "expect_text", "expect_url", "assert_state"}
+            if not any(str(step.get("action") or "") in assertion_actions for step in steps):
+                steps.append({
+                    "action": "manual",
+                    "description": "Bổ sung assertion kiểm chứng kết quả nghiệp vụ trước khi phân loại là có thể tự động hóa.",
+                })
+                automation_level = "manual"
             generated.append({
                 "case_key": f"AI-{uuid.uuid4().hex[:10].upper()}",
                 "req_key": req_key,
