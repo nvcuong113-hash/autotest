@@ -212,6 +212,13 @@ def _classify_auth_state(final_url: str, api_responses: list[dict[str, Any]], bo
     }
 
 
+def _inspection_start_url(target_url: str, base_url: str, authenticate: bool) -> str:
+    """Avoid loading the heavy business SPA before login when authentication is requested."""
+    if not authenticate:
+        return target_url
+    return urljoin(base_url.rstrip("/") + "/", "login")
+
+
 def _navigate_to_login_page(page: Any, base_url: str, timeout_seconds: int = 12) -> dict[str, Any]:
     """Open the first-party OAP Meta login route before locating credentials fields."""
     login_url = urljoin(base_url.rstrip("/") + "/", "login")
@@ -292,6 +299,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
     if not base_url.strip():
         raise ValueError("Cần cấu hình Base URL trước khi kiểm tra.")
     url = _resolve_url(target_url.strip() or base_url.strip(), base_url.strip())
+    initial_url = _inspection_start_url(url, base_url.strip(), authenticate)
     parsed = urlparse(url)
     if parsed.username or parsed.password:
         raise ValueError("Không đưa thông tin đăng nhập vào URL.")
@@ -412,7 +420,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             page.on("pageerror", on_page_error)
 
             try:
-                page.goto(url, wait_until="commit", timeout=25000)
+                page.goto(initial_url, wait_until="commit", timeout=20000)
             except Exception as exc:
                 navigation_errors.append(f"Điều hướng ban đầu: {type(exc).__name__}: {exc}")
 
@@ -429,6 +437,12 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                     snapshot = current
                     body = str(current.get("body_text_preview", ""))
                     pending_auth = "checking authentication" in body.lower() or "đang kiểm tra xác thực" in body.lower()
+                    input_types = {str(item.get("type", "")).lower() for item in current.get("inputs", [])}
+                    has_login_form = "password" in input_types and any(
+                        item.get("type") in {"email", "text"} for item in current.get("inputs", [])
+                    )
+                    if authenticate and has_login_form:
+                        break
                     if body and body == last_body and not pending_auth:
                         stable_count += 1
                     else:
@@ -490,23 +504,9 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                             pass
                         page.wait_for_timeout(600)
                     if auth_state["authenticated"]:
+                        # The protected URL has already been loaded and /auth/me returned 200.
+                        # Do not navigate a second time; keep the browser memory footprint low.
                         login_diagnostic["result"] = "AUTHENTICATED"
-                        try:
-                            page.goto(url, wait_until="commit", timeout=20000)
-                            auth_deadline = time.monotonic() + 12
-                            while time.monotonic() < auth_deadline:
-                                try:
-                                    snapshot = _evaluate_with_navigation_retry(page, snapshot_script, attempts=2)
-                                    final_body = str(snapshot.get("body_text_preview", ""))
-                                    final_url = snapshot.get("final_url") or page.url
-                                    auth_state = _classify_auth_state(final_url, api_responses, final_body)
-                                    if final_body and not auth_state["authentication_pending"]:
-                                        break
-                                except Exception:
-                                    pass
-                                page.wait_for_timeout(500)
-                        except Exception as exc:
-                            navigation_errors.append(f"Không mở lại được màn hình sau đăng nhập: {type(exc).__name__}")
                     elif auth_state["mfa_required"]:
                         login_diagnostic["result"] = "MFA_REQUIRED"
                     else:
@@ -583,6 +583,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
 
             return {
                 "requested_url":url,
+                "inspection_start_url":initial_url,
                 "final_url":final_url,
                 "http_status":document_responses[-1]["status"] if document_responses else None,
                 "title":snapshot.get("title", ""),
