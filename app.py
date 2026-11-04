@@ -20,11 +20,16 @@ try:
     from core.ai_provider import get_ai_status
     from core.application_profile import (
         get_profile_mapping_summary, list_application_profiles, load_application_profile,
+        merge_profile_mappings,
+    )
+    from core.automation_assessment import (
+        assess_cases, assessment_summary, build_mapping_coverage,
     )
     from core.runner_client import inspect_page, run_suite
     from core.db import (
         add_test_cases, create_project, init_db, list_projects, list_requirements,
         list_results, list_runs, list_test_cases, save_requirements, update_test_case,
+        list_application_mappings, save_application_mappings, delete_application_mapping,
     )
     from core.srs_parser import parse_srs
     from core.test_generator import generate_cases, validate_steps_json
@@ -78,6 +83,7 @@ with st.sidebar:
     projects = list_projects()
     names = [p["name"] for p in projects]
     selected_name = st.selectbox("Dự án kiểm thử", names, index=0 if names else None, placeholder="Chọn hoặc tạo dự án")
+    selected_project_sidebar = next((item for item in projects if item["name"] == selected_name), None)
     with st.expander("＋ Tạo dự án", expanded=not projects):
         new_name = st.text_input("Tên dự án", placeholder="Ví dụ: OAP Meta - CCM Bảo lãnh")
         new_desc = st.text_area("Mô tả", placeholder="Phạm vi hệ thống và nghiệp vụ cần kiểm thử")
@@ -115,7 +121,12 @@ with st.sidebar:
         ),
         key="application_profile_id",
     )
-    application_profile = load_application_profile(application_profile_id)
+    application_profile_base = load_application_profile(application_profile_id)
+    mapping_records = (
+        list_application_mappings(int(selected_project_sidebar["id"]), application_profile_id)
+        if selected_project_sidebar else []
+    )
+    application_profile = merge_profile_mappings(application_profile_base, mapping_records)
     mapping_summary = get_profile_mapping_summary(application_profile)
     st.caption(
         f"Profile v{application_profile.get('version', '1.0.0')} · "
@@ -173,8 +184,8 @@ for col, (label, value) in zip(metric_cols, metric_items):
             unsafe_allow_html=True,
         )
 
-tab_srs, tab_cases, tab_run, tab_report = st.tabs(
-    ["📄 Tài liệu & Yêu cầu", "🧩 Bộ Test Case", "▶ Thực thi", "📊 Báo cáo"])
+tab_srs, tab_cases, tab_mapping, tab_run, tab_report = st.tabs(
+    ["📄 Tài liệu & Yêu cầu", "🧩 Bộ Test Case", "🧭 Mapping & Coverage", "▶ Thực thi", "📊 Báo cáo"])
 
 with tab_srs:
     st.subheader("Nhập tài liệu SRS")
@@ -406,6 +417,247 @@ with tab_cases:
                     st.error(f"Test Case không hợp lệ: {exc}")
     else:
         st.info("Chưa có Test Case. Hãy nạp bộ kiểm thử bảo lãnh hoặc tạo từ danh sách yêu cầu.")
+
+with tab_mapping:
+    st.subheader("Đánh giá khả năng tự động hóa")
+    fresh_cases = list_test_cases(pid)
+    project_mappings = list_application_mappings(pid, application_profile_id)
+    effective_profile = merge_profile_mappings(
+        load_application_profile(application_profile_id), project_mappings
+    )
+    assessments = assess_cases(fresh_cases, effective_profile)
+    summary = assessment_summary(assessments)
+    coverage = build_mapping_coverage(fresh_cases, effective_profile, project_mappings)
+
+    metric_cols = st.columns(4)
+    for col, label, value in zip(
+        metric_cols,
+        ["Tổng Test Case", "Đủ điều kiện chạy", "Bị chặn", "Target đã mapping"],
+        [summary["total"], summary["ready"], summary["blocked"],
+         sum(1 for item in coverage if item["verified"])],
+    ):
+        with col:
+            st.metric(label, value)
+
+    st.caption(
+        f"Tự động hóa được: {summary['automatable']} · "
+        f"Một phần: {summary['partially_automatable']} · "
+        f"Thủ công: {summary['manual']}"
+    )
+    if st.button("Đánh giá lại và cập nhật mức tự động hóa cho toàn bộ Test Case",
+                 type="primary", key=f"reassess_all_{pid}"):
+        updated = 0
+        for case, assessment in zip(fresh_cases, assessments):
+            new_level = assessment["recommended_level"]
+            if str(case.get("automation_level") or "manual") != new_level:
+                update_test_case(int(case["id"]), {"automation_level": new_level})
+                updated += 1
+        st.success(
+            f"Đã đánh giá {len(assessments)} Test Case; cập nhật mức tự động hóa của {updated} case. "
+            "Chỉ case READY mới được xếp mức Tự động."
+        )
+        st.rerun()
+
+    st.markdown("**Danh sách Test Case và lý do bị chặn**")
+    if assessments:
+        assessment_view = pd.DataFrame([{
+            "Mã Test Case": item["case_key"],
+            "Mã yêu cầu": item["req_key"],
+            "Tên Test Case": item["title"],
+            "Mức hiện tại": item["current_level"],
+            "Đề xuất": item["recommended_level"],
+            "Trạng thái": "SẴN SÀNG" if item["status"] == "READY" else "BỊ CHẶN",
+            "Lý do / Việc cần làm": item["blocked_reason"],
+            "Số target": item["target_count"],
+        } for item in assessments])
+        st.dataframe(assessment_view, use_container_width=True, hide_index=True)
+    else:
+        st.info("Dự án chưa có Test Case.")
+
+    st.divider()
+    st.subheader("Mapping Coverage theo màn hình và target")
+    st.caption(
+        "Một mapping đã xác minh được dùng chung cho mọi Test Case trong dự án tham chiếu cùng "
+        "page/target. Không cần khai báo selector riêng cho từng Test Case."
+    )
+    if coverage:
+        coverage_view = pd.DataFrame([{
+            "Màn hình": item["page_id"],
+            "Semantic target": item["target_id"],
+            "Trạng thái mapping": item["mapping_status"],
+            "Số Test Case sử dụng": item["usage_count"],
+            "Các Test Case": item["case_keys"],
+            "Locator": item["locator"],
+        } for item in coverage])
+        st.dataframe(coverage_view, use_container_width=True, hide_index=True)
+    else:
+        st.info(
+            "Chưa có Test Case nào chứa semantic target. Bộ 75 case mẫu hiện vẫn là manual placeholder; "
+            "cần chuyển từng nhóm bước nghiệp vụ sang semantic action trước khi mapping có thể mở khóa."
+        )
+
+    st.divider()
+    st.subheader("Tạo / cập nhật mapping dùng chung")
+    st.caption(
+        "Chọn target đã được Test Case tham chiếu hoặc tạo target mới. Mapping lưu ở cấp dự án + Application Profile; "
+        "chỉ đánh dấu xác minh sau khi đã kiểm tra locator trên đúng màn hình Staging."
+    )
+    page_options = list((effective_profile.get("pages") or {}).keys())
+    if not page_options:
+        st.warning("Application Profile chưa khai báo page nghiệp vụ.")
+    else:
+        missing_target_refs = [
+            item for item in coverage
+            if item["mapping_status"] != "Đã xác minh" and item["target_id"]
+        ]
+        target_choice_options = ["Tạo target mới"] + [
+            f"{item['page_id']} :: {item['target_id']}" for item in missing_target_refs
+        ]
+        target_choice = st.selectbox(
+            "Target cần mapping",
+            target_choice_options,
+            key=f"map_target_choice_{pid}",
+        )
+        suggested_page = page_options[0]
+        suggested_target = ""
+        if target_choice != "Tạo target mới":
+            page_label, suggested_target = target_choice.split(" :: ", 1)
+            suggested_page = page_label if page_label in page_options else page_options[0]
+
+        page_id = st.selectbox(
+            "Màn hình / Page",
+            page_options,
+            index=page_options.index(suggested_page),
+            format_func=lambda value: str((effective_profile.get("pages") or {}).get(value, {}).get("name") or value),
+            key=f"map_page_{pid}",
+        )
+
+        inspection = st.session_state.get(f"inspection_{pid}") or {}
+        candidates = []
+        for item in inspection.get("inputs", []) + inspection.get("buttons", []):
+            selector = str(item.get("suggested_selector") or "").strip()
+            if not selector:
+                continue
+            candidates.append(item)
+        candidate_labels = ["Không lấy từ Inspector"] + [
+            f"{item.get('tag','element')} · {item.get('name') or item.get('id') or item.get('text') or item.get('placeholder') or 'không nhãn'} · {item.get('suggested_selector')}"
+            for item in candidates
+        ]
+        candidate_label = st.selectbox(
+            "Phần tử gợi ý từ lần Inspector gần nhất",
+            candidate_labels,
+            key=f"map_candidate_{pid}",
+        )
+        selected_candidate = (
+            candidates[candidate_labels.index(candidate_label) - 1]
+            if candidate_label != "Không lấy từ Inspector" else {}
+        )
+        candidate_selector = str(selected_candidate.get("suggested_selector") or "")
+        default_target = suggested_target or ""
+        target_id = st.text_input(
+            "Semantic target ID",
+            value=default_target,
+            placeholder="Ví dụ: guarantee.filter.keyword",
+            key=f"map_target_id_{pid}",
+            help="Dùng tên nghiệp vụ ổn định. Một target có thể được tham chiếu bởi nhiều Test Case.",
+        )
+        strategy_options = ["css", "role", "label", "placeholder", "text"]
+        strategy = st.selectbox(
+            "Loại locator",
+            strategy_options,
+            index=0,
+            key=f"map_strategy_{pid}",
+        )
+        locator_value = st.text_input(
+            "Locator value",
+            value=candidate_selector,
+            placeholder="Ví dụ: input[name='f_keyword']",
+            key=f"map_locator_value_{pid}",
+        )
+        locator_name = st.text_input(
+            "Accessible name (chỉ dùng cho role)",
+            value=str(selected_candidate.get("aria_label") or selected_candidate.get("text") or ""),
+            key=f"map_locator_name_{pid}",
+        )
+        exact = st.checkbox("So khớp chính xác", value=True, key=f"map_exact_{pid}")
+        evidence_default = ""
+        if selected_candidate:
+            evidence_default = (
+                f"Inspector URL: {inspection.get('final_url','')}; "
+                f"tag={selected_candidate.get('tag','')}; id={selected_candidate.get('id','')}; "
+                f"name={selected_candidate.get('name','')}; placeholder={selected_candidate.get('placeholder','')}"
+            )
+        evidence = st.text_area(
+            "Bằng chứng rà soát / ghi chú",
+            value=evidence_default,
+            height=75,
+            key=f"map_evidence_{pid}",
+        )
+        verified = st.checkbox(
+            "Tôi đã kiểm tra locator này trên đúng màn hình và xác nhận nó trỏ tới phần tử nghiệp vụ mong muốn",
+            value=False,
+            key=f"map_verified_{pid}",
+        )
+        if st.button(
+            "Lưu mapping dùng chung",
+            type="primary",
+            disabled=not target_id.strip() or not locator_value.strip(),
+            key=f"save_mapping_{pid}",
+        ):
+            try:
+                if target_id.strip().startswith("auth."):
+                    raise ValueError("Không được dùng form mapping nghiệp vụ để ghi đè target xác thực.")
+                saved = save_application_mappings(pid, application_profile_id, [{
+                    "page_id": page_id,
+                    "target_id": target_id.strip(),
+                    "locator_by": strategy,
+                    "locator_value": locator_value.strip(),
+                    "locator_name": locator_name.strip(),
+                    "exact": exact,
+                    "verified": verified,
+                    "evidence": evidence.strip(),
+                }])
+                st.success(
+                    f"Đã lưu {saved} mapping. "
+                    + ("Mapping đã xác minh và sẽ được dùng chung cho các Test Case tham chiếu target này."
+                       if verified else "Mapping đang ở trạng thái CHƯA XÁC MINH nên chưa được phép chạy.")
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Không thể lưu mapping: {exc}")
+
+    if project_mappings:
+        st.markdown("**Mapping đã lưu trong dự án**")
+        mapping_view = pd.DataFrame([{
+            "Màn hình": item.get("page_id") or "(Shared)",
+            "Semantic target": item.get("target_id"),
+            "Locator": f"{item.get('locator_by')}: {item.get('locator_value')}",
+            "Xác minh": "Có" if item.get("verified") else "Chưa",
+            "Bằng chứng": item.get("evidence") or "",
+        } for item in project_mappings])
+        st.dataframe(mapping_view, use_container_width=True, hide_index=True)
+        mapping_options = {
+            f"{item.get('page_id') or '(Shared)'} :: {item.get('target_id')}": item
+            for item in project_mappings
+        }
+        selected_mapping_label = st.selectbox(
+            "Mapping cần gỡ",
+            list(mapping_options),
+            key=f"delete_mapping_select_{pid}",
+        )
+        if st.button("Gỡ mapping đã chọn", key=f"delete_mapping_{pid}"):
+            item = mapping_options[selected_mapping_label]
+            delete_application_mapping(
+                pid, application_profile_id,
+                str(item.get("page_id") or ""), str(item.get("target_id") or ""),
+            )
+            st.success("Đã gỡ mapping. Các Test Case tham chiếu target này sẽ bị chặn cho đến khi mapping hợp lệ được khôi phục.")
+            st.rerun()
+
+    st.info(
+        "Lưu ý: Mapping chỉ giải quyết locator. Test Case mẫu đang có bước manual vẫn cần được chuyển thành "
+        "workflow nghiệp vụ có assertion; không có cơ chế tự đổi manual thành tự động chỉ bằng cách thêm selector."
+    )
 
 with tab_run:
     runner_configured = bool(os.getenv("RUNNER_URL", "").strip() and os.getenv("RUNNER_API_TOKEN", ""))
