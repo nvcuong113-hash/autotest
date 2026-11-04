@@ -331,3 +331,23 @@ def test_auth_login_response_summary_never_exposes_token_values():
     assert result["token_fields_present"]["access_token"] is True
     assert "super-secret-token" not in serialized
     assert "refresh-secret" not in serialized
+
+
+
+def test_browser_runner_diagnostic_buffers_are_bounded():
+    from core.browser_runner import _append_limited
+
+    values = []
+    for number in range(10):
+        _append_limited(values, number, limit=6)
+    assert len(values) <= 6
+    assert values[-1] == 9
+    assert 9 in values
+
+
+def test_low_memory_chromium_profile_caps_v8_heap():
+    from core.browser_runner import CHROMIUM_ARGS
+
+    assert "--js-flags=--max-old-space-size=128" in CHROMIUM_ARGS
+    assert "--renderer-process-limit=1" in CHROMIUM_ARGS
+    assert "--disable-dev-shm-usage" in CHROMIUM_ARGS
