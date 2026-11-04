@@ -113,6 +113,11 @@ def add_test_cases(project_id: int, cases: list[dict[str, Any]], db_path: str | 
             if not title:
                 continue
             key = str(case.get("case_key") or f"TC-{uuid.uuid4().hex[:8].upper()}")
+            # Case keys are globally unique in the current SQLite schema. Prefix a
+            # built-in suite key when the same catalogue is imported into another project.
+            collision = conn.execute("SELECT project_id FROM test_cases WHERE case_key=?", (key,)).fetchone()
+            if collision and int(collision["project_id"]) != project_id:
+                key = f"P{project_id}-{key}"
             steps = case.get("steps", [])
             steps_json = steps if isinstance(steps, str) else __import__("json").dumps(steps, ensure_ascii=False)
             cur = conn.execute("""INSERT OR IGNORE INTO test_cases

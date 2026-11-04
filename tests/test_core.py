@@ -74,3 +74,16 @@ def test_builtin_guarantee_suite_import_and_traceability(tmp_path):
     assert len(saved_cases) == len(suite["test_cases"])
     assert all(case["req_key"] for case in saved_cases)
     assert all(case["source_ref"] for case in saved_cases)
+
+    # Re-importing the catalogue to the same project must be idempotent.
+    repeated = import_guarantee_suite(project_id, db_path=db)
+    assert repeated["case_count"] == 0
+    assert len(list_test_cases(project_id, db_path=db)) == len(suite["test_cases"])
+
+    # The same built-in catalogue must also be importable into a second project.
+    second_project = create_project("CCM Guarantee - Second Entity", db_path=db)
+    second_import = import_guarantee_suite(second_project, db_path=db)
+    assert second_import["case_count"] == len(suite["test_cases"])
+    second_cases = list_test_cases(second_project, db_path=db)
+    assert len(second_cases) == len(suite["test_cases"])
+    assert all(case["case_key"].startswith("P" + str(second_project) + "-BG-") for case in second_cases)
