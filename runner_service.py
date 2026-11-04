@@ -5,12 +5,12 @@ import hmac
 import json
 import os
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 from core.browser_runner import inspect_page, run_suite
-from core.db import init_db
+from core.db import init_db, mark_interrupted_runs
 
 MAX_BODY_BYTES = 2 * 1024 * 1024
 RUNNER_TOKEN = os.getenv("RUNNER_API_TOKEN", "")
@@ -134,8 +134,13 @@ class RunnerHandler(BaseHTTPRequestHandler):
             _browser_job_lock.release()
 
 
+class SingleRunnerHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     if DATABASE_URL:
         init_db()
-    HTTPServer(("0.0.0.0", port), RunnerHandler).serve_forever()
+        mark_interrupted_runs()
+    SingleRunnerHTTPServer(("0.0.0.0", port), RunnerHandler).serve_forever()
