@@ -104,6 +104,94 @@ def _evaluate_with_navigation_retry(page: Any, script: str, attempts: int = 6) -
     raise RuntimeError("Không thể đọc DOM sau nhiều lần thử.")
 
 
+def _assess_page_readiness(snapshot: dict[str, Any], target_url: str) -> dict[str, Any]:
+    """Distinguish a valid authenticated shell from a fully loaded business module."""
+    body = str(snapshot.get("body_text_preview") or "")
+    main_text = str(snapshot.get("main_text_preview") or "")
+    current_url = str(snapshot.get("final_url") or "")
+    target_path = urlparse(target_url).path.rstrip("/").lower()
+    current_path = urlparse(current_url).path.rstrip("/").lower()
+    is_target_page = bool(target_path and current_path == target_path)
+    combined = (body + " " + main_text).lower()
+    loading_markers = (
+        "loading...", "loading…", "đang tải", "please wait",
+        "checking authentication", "đang kiểm tra xác thực",
+    )
+    loading_text = any(marker in combined for marker in loading_markers)
+    loading_indicators = int(snapshot.get("loading_indicator_count") or 0)
+    table_count = int(snapshot.get("table_count") or 0)
+    row_count = int(snapshot.get("data_row_count") or 0)
+    main_length = len(main_text.strip())
+    has_content_surface = bool(
+        table_count > 0 or row_count > 0 or snapshot.get("headings")
+        or snapshot.get("forms") or snapshot.get("inputs") or main_length >= 80
+    )
+    ready_candidate = is_target_page and not loading_text and loading_indicators == 0 and has_content_surface
+    if not is_target_page:
+        state = "TARGET_URL_NOT_REACHED"
+    elif loading_text or loading_indicators:
+        state = "BUSINESS_PAGE_LOADING"
+    elif not has_content_surface:
+        state = "BUSINESS_CONTENT_NOT_DETECTED"
+    else:
+        state = "BUSINESS_CONTENT_CANDIDATE"
+    return {
+        "ready_candidate": ready_candidate,
+        "state": state,
+        "is_target_page": is_target_page,
+        "loading_text_detected": loading_text,
+        "loading_indicator_count": loading_indicators,
+        "table_count": table_count,
+        "data_row_count": row_count,
+        "main_text_length": main_length,
+    }
+
+
+def _wait_for_business_page(page: Any, snapshot_script: str, target_url: str,
+                            timeout_seconds: int = 25) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Wait for the requested module content, not merely the /auth/me success response."""
+    deadline = time.monotonic() + timeout_seconds
+    last_snapshot: dict[str, Any] = {}
+    last_signature = ""
+    stable_count = 0
+    readiness: dict[str, Any] = {"ready_candidate": False, "state": "BUSINESS_PAGE_LOADING"}
+    while time.monotonic() < deadline:
+        try:
+            current = _evaluate_with_navigation_retry(page, snapshot_script, attempts=2)
+            last_snapshot = current
+            readiness = _assess_page_readiness(current, target_url)
+            signature = "|".join((
+                str(current.get("body_text_preview", ""))[-500:],
+                str(current.get("main_text_preview", ""))[-500:],
+                str(readiness.get("table_count", 0)),
+                str(readiness.get("data_row_count", 0)),
+            ))
+            if readiness["ready_candidate"] and signature == last_signature:
+                stable_count += 1
+            else:
+                stable_count = 0
+            last_signature = signature
+            if readiness["ready_candidate"] and stable_count >= 2:
+                readiness["ready"] = True
+                readiness["state"] = "BUSINESS_PAGE_READY"
+                return last_snapshot, readiness
+        except Exception as exc:
+            readiness = {
+                "ready_candidate": False,
+                "ready": False,
+                "state": "BUSINESS_PAGE_INSPECTION_RETRY",
+                "last_error_type": type(exc).__name__,
+            }
+        try:
+            page.wait_for_timeout(700)
+        except Exception:
+            break
+    readiness["ready"] = False
+    if readiness.get("state") == "BUSINESS_CONTENT_CANDIDATE":
+        readiness["state"] = "BUSINESS_CONTENT_NOT_STABLE"
+    return last_snapshot, readiness
+
+
 def _http_status(item: dict[str, Any]) -> int:
     raw = str(item.get("status", "")).strip()
     digits = "".join(character for character in raw if character.isdigit())
@@ -347,8 +435,15 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             method:(el.getAttribute('method') || 'get').toUpperCase(), action:el.action || '', id:el.id || '', name:el.getAttribute('name') || ''}));
         const links = Array.from(document.querySelectorAll('a[href]')).slice(0,60).map((el, i) => ({
             index:i, text:clean(el.innerText || el.textContent).slice(0,120), href:el.href}));
+        const main = document.querySelector('main,[role="main"],#main-content,.main-content') || document.body;
+        const mainText = clean(main ? main.innerText : '');
+        const tableCount = document.querySelectorAll('table,[role="grid"],[role="table"],.ant-table,.MuiDataGrid-root').length;
+        const rowCount = document.querySelectorAll('tbody tr,[role="row"],.ant-table-row,.MuiDataGrid-row').length;
+        const loadingCount = document.querySelectorAll('[aria-busy="true"],[role="progressbar"],.ant-spin-spinning,.MuiCircularProgress-root,.loading-spinner').length;
         return {title:document.title || '', final_url:location.href, ready_state:document.readyState,
-            headings, forms, inputs, buttons, links,
+            headings, forms, inputs, buttons, links, table_count:tableCount,
+            data_row_count:rowCount, loading_indicator_count:loadingCount,
+            main_text_preview:mainText.slice(0,1200),
             body_text_preview:clean(document.body ? document.body.innerText : '').slice(0,1600)};
     }'''
 
@@ -504,9 +599,14 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                             pass
                         page.wait_for_timeout(600)
                     if auth_state["authenticated"]:
-                        # The protected URL has already been loaded and /auth/me returned 200.
-                        # Do not navigate a second time; keep the browser memory footprint low.
+                        # Authentication is now confirmed. Continue waiting for the CCM module;
+                        # /auth/me=200 alone does not mean the business page finished rendering.
                         login_diagnostic["result"] = "AUTHENTICATED"
+                        snapshot, page_readiness = _wait_for_business_page(
+                            page, snapshot_script, url, timeout_seconds=25
+                        )
+                        final_body = str(snapshot.get("body_text_preview", ""))
+                        final_url = snapshot.get("final_url") or page.url
                     elif auth_state["mfa_required"]:
                         login_diagnostic["result"] = "MFA_REQUIRED"
                     else:
@@ -535,6 +635,13 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             final_url = snapshot.get("final_url") or (page.url if not page.is_closed() else "")
             auth_state = _classify_auth_state(final_url, api_responses, final_body,
                                               login_attempted=login_diagnostic.get("attempted", False))
+            if "page_readiness" not in locals():
+                snapshot, page_readiness = _wait_for_business_page(
+                    page, snapshot_script, url, timeout_seconds=18
+                )
+                final_body = str(snapshot.get("body_text_preview", ""))
+                final_url = snapshot.get("final_url") or page.url
+                auth_state = _classify_auth_state(final_url, api_responses, final_body)
 
             # Inspect each frame separately: enterprise SSO pages may render controls in an iframe.
             frame_diagnostics: list[dict[str, Any]] = []
@@ -590,6 +697,8 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                 "ready_state":snapshot.get("ready_state", "unknown"),
                 **auth_state,
                 "login_diagnostic":login_diagnostic,
+                "business_page_ready":bool(page_readiness.get("ready")),
+                "business_page_readiness":page_readiness,
                 "frame_diagnostics":frame_diagnostics,
                 "headings":snapshot.get("headings", []),
                 "forms":snapshot.get("forms", []),
