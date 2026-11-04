@@ -304,6 +304,14 @@ with tab_run:
                 st.error("Không tìm thấy đầy đủ trường Tên đăng nhập, Mật khẩu và nút Đăng nhập trong trang hiện tại.")
             elif login_result == "MISSING_CREDENTIALS":
                 st.warning("Chưa nhập đủ thông tin tài khoản kiểm thử.")
+            elif login_result == "NOT_REQUESTED":
+                st.info("Chưa bật tùy chọn đăng nhập. Inspector chỉ đọc trang hiện tại và chưa gửi form đăng nhập.")
+            elif login_result == "LOGIN_PAGE_READY":
+                st.info("Đã mở trang đăng nhập OAP Meta và tìm thấy form. Chưa gửi thông tin đăng nhập.")
+            elif login_result == "LOGIN_FORM_NOT_READY":
+                st.error("Đã mở trang /login nhưng chưa tìm thấy đầy đủ trường đăng nhập sau thời gian chờ.")
+            elif login_result == "LOGIN_ROUTE_NAVIGATION_FAILED":
+                st.error("Không mở được đường dẫn /login của OAP Meta: " + str(inspection.get("login_diagnostic", {}).get("error_type", "Lỗi điều hướng")))
             elif login_result == "SUBMISSION_ERROR":
                 st.error("Không thể gửi form đăng nhập: " + str(inspection.get("login_diagnostic", {}).get("error_type", "Lỗi trình duyệt")))
             st.caption("Trạng thái tài liệu: " + str(inspection.get("ready_state", "unknown")))
