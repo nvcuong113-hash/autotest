@@ -95,30 +95,92 @@ def _evaluate_with_navigation_retry(page: Any, script: str, attempts: int = 6) -
     raise RuntimeError("Không thể đọc DOM sau nhiều lần thử.")
 
 
+def _http_status(item: dict[str, Any]) -> int:
+    raw = str(item.get("status", "")).strip()
+    digits = "".join(character for character in raw if character.isdigit())
+    return int(digits[:3]) if len(digits) >= 3 else 0
+
+
+def _safe_auth_text(value: Any) -> str:
+    """Return short diagnostic text without email addresses or bearer/token strings."""
+    text = str(value or "")
+    text = re.sub(r"(?i)bearer\\s+[A-Za-z0-9._~+/-]+=*", "Bearer [REDACTED]", text)
+    text = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[email]", text)
+    text = re.sub(r"(?i)(access[_-]?token|refresh[_-]?token|password)\\s*[:=]\\s*[^,;\\s]+", r"\\1=[REDACTED]", text)
+    return text[:240]
+
+
+def _auth_login_response_summary(status: int, payload: Any, content_type: str = "",
+                                 has_set_cookie: bool = False) -> dict[str, Any]:
+    """Summarize a login response without exposing credentials, cookies or tokens."""
+    summary: dict[str, Any] = {
+        "http_status": int(status),
+        "content_type": _safe_auth_text(content_type),
+        "has_set_cookie": bool(has_set_cookie),
+        "payload_type": type(payload).__name__,
+    }
+    if isinstance(payload, dict):
+        summary["response_keys"] = sorted(str(key)[:60] for key in payload.keys())[:40]
+        for key in ("success", "ok", "authenticated"):
+            if isinstance(payload.get(key), bool):
+                summary[key] = payload[key]
+        for key in ("code", "error_code", "status"):
+            value = payload.get(key)
+            if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+                summary[key] = _safe_auth_text(value)
+        for key in ("message", "error", "detail"):
+            value = payload.get(key)
+            if isinstance(value, (str, int, float)):
+                summary["message"] = _safe_auth_text(value)
+                break
+        data = payload.get("data")
+        if isinstance(data, dict):
+            summary["data_keys"] = sorted(str(key)[:60] for key in data.keys())[:40]
+            summary["token_fields_present"] = {
+                key: key in data
+                for key in ("token", "access_token", "accessToken", "refresh_token", "refreshToken")
+            }
+    elif isinstance(payload, list):
+        summary["item_count"] = len(payload)
+    elif isinstance(payload, str):
+        summary["message"] = _safe_auth_text(payload)
+    return summary
+
+
 def _classify_auth_state(final_url: str, api_responses: list[dict[str, Any]], body_text: str,
-                        login_attempted: bool = False) -> dict[str, Any]:
-    """Classify login-required, MFA, pending, failed and authenticated states."""
+                         login_attempted: bool = False) -> dict[str, Any]:
+    """Only /auth/me can confirm a session; POST /auth/login HTTP 200 is not proof."""
     path = urlparse(final_url).path.rstrip("/").lower()
     login_path = path.endswith("/login") or path.endswith("/signin") or path.endswith("/sign-in")
-    auth_events = [item for item in api_responses if (
-        "/auth/me" in str(item.get("url", "")).lower()
-        or "/api/v1/auth/" in str(item.get("url", "")).lower()
-    )]
-    def status_code(item: dict[str, Any]) -> int:
-        raw = str(item.get("status", "")).strip()
-        digits = "".join(character for character in raw if character.isdigit())
-        return int(digits[:3]) if len(digits) >= 3 else 0
-    auth_api_401 = any(status_code(item) == 401 for item in auth_events)
-    auth_api_success = any(status_code(item) == 200 for item in auth_events)
+    auth_me_events = [
+        item for item in api_responses
+        if urlparse(str(item.get("url", ""))).path.rstrip("/").lower().endswith("/auth/me")
+    ]
+    login_events = [
+        item for item in api_responses
+        if urlparse(str(item.get("url", ""))).path.rstrip("/").lower().endswith("/auth/login")
+        and str(item.get("method", "")).upper() == "POST"
+    ]
+    latest_me_status = _http_status(auth_me_events[-1]) if auth_me_events else 0
+    auth_api_401 = latest_me_status == 401
+    auth_api_success = latest_me_status == 200
+    latest_login = login_events[-1] if login_events else None
+    login_status = _http_status(latest_login) if latest_login else 0
+
     body_lower = body_text.lower()
     pending = "checking authentication" in body_lower or "đang kiểm tra xác thực" in body_lower
-    mfa_required = any(token in body_lower for token in ("mã xác thực", "verification code", "one-time password", "two-factor", "2fa", "otp"))
+    mfa_required = any(token in body_lower for token in (
+        "mã xác thực", "verification code", "one-time password", "two-factor", "2fa", "otp"
+    ))
     authenticated = auth_api_success and not login_path
     required = not authenticated and (login_path or auth_api_401 or mfa_required)
+
     if authenticated:
         state = "AUTHENTICATED"
     elif mfa_required:
         state = "MFA_REQUIRED"
+    elif login_attempted and login_path and login_status >= 400:
+        state = "LOGIN_REJECTED"
     elif login_attempted and (login_path or auth_api_401):
         state = "LOGIN_NOT_CONFIRMED"
     elif login_path or auth_api_401:
@@ -127,12 +189,15 @@ def _classify_auth_state(final_url: str, api_responses: list[dict[str, Any]], bo
         state = "AUTH_PENDING"
     else:
         state = "AUTH_STATE_UNKNOWN"
+
     return {
         "authentication_required": required,
         "authentication_pending": pending and not authenticated,
         "authentication_state": state,
         "auth_api_401": auth_api_401,
         "auth_api_success": auth_api_success,
+        "auth_me_latest_status": latest_me_status or None,
+        "login_api_latest_status": login_status or None,
         "redirected_to_login": login_path,
         "authenticated": authenticated,
         "mfa_required": mfa_required,
@@ -295,6 +360,19 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                     request = response.request
                     entry = {"url":safe_url(response.url), "status":response.status,
                              "resource_type":request.resource_type, "method":request.method}
+                    response_path = urlparse(response.url).path.rstrip("/").lower()
+                    if response_path.endswith("/api/v1/auth/login") and request.method.upper() == "POST":
+                        payload: Any = None
+                        try:
+                            payload = response.json()
+                        except Exception:
+                            payload = None
+                        headers = response.headers
+                        entry["login_response_summary"] = _auth_login_response_summary(
+                            response.status, payload,
+                            headers.get("content-type", ""),
+                            bool(headers.get("set-cookie")),
+                        )
                     if request.resource_type == "document":
                         document_responses.append(entry)
                     elif request.resource_type in {"xhr", "fetch"}:
@@ -372,18 +450,37 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                     login_diagnostic = _submit_username_password_login(page, username, password)
                     login_diagnostic["login_page_navigated"] = login_route.get("navigated", False)
                 if login_diagnostic["result"] == "SUBMITTED":
+                    # Wait briefly for the login endpoint, then force a fresh protected-page
+                    # navigation so the app must re-check its newly issued session.
+                    page.wait_for_timeout(1200)
+                    latest_login_event = next((
+                        item for item in reversed(api_responses)
+                        if urlparse(str(item.get("url", ""))).path.rstrip("/").lower().endswith("/api/v1/auth/login")
+                        and str(item.get("method", "")).upper() == "POST"
+                    ), None)
+                    if latest_login_event:
+                        login_diagnostic["login_api_status"] = _http_status(latest_login_event)
+                        login_diagnostic["login_api_response"] = latest_login_event.get("login_response_summary", {})
+                    else:
+                        login_diagnostic["login_api_status"] = None
+                    try:
+                        page.goto(url, wait_until="commit", timeout=20000)
+                    except Exception as exc:
+                        navigation_errors.append(f"Kiểm tra phiên sau đăng nhập: {type(exc).__name__}")
                     auth_deadline = time.monotonic() + 18
                     while time.monotonic() < auth_deadline:
                         try:
                             snapshot = _evaluate_with_navigation_retry(page, snapshot_script, attempts=2)
                             final_body = str(snapshot.get("body_text_preview", ""))
                             final_url = snapshot.get("final_url") or page.url
-                            auth_state = _classify_auth_state(final_url, api_responses, final_body, login_attempted=True)
+                            auth_state = _classify_auth_state(
+                                final_url, api_responses, final_body, login_attempted=True
+                            )
                             if auth_state["authenticated"] or auth_state["mfa_required"]:
                                 break
                         except Exception:
                             pass
-                        page.wait_for_timeout(650)
+                        page.wait_for_timeout(600)
                     if auth_state["authenticated"]:
                         login_diagnostic["result"] = "AUTHENTICATED"
                         try:
@@ -406,6 +503,17 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                         login_diagnostic["result"] = "MFA_REQUIRED"
                     else:
                         login_diagnostic["result"] = "LOGIN_NOT_CONFIRMED"
+                    try:
+                        login_diagnostic["storage_metadata"] = page.evaluate(
+                            """() => ({
+                                local_storage_keys: Object.keys(localStorage),
+                                session_storage_keys: Object.keys(sessionStorage)
+                            })"""
+                        )
+                        cookie_list = context.cookies([base_url])
+                        login_diagnostic["cookie_names"] = sorted({item.get("name", "") for item in cookie_list})[:40]
+                    except Exception:
+                        pass
             elif authenticate and not auth_state["authentication_required"]:
                 login_diagnostic["result"] = "LOGIN_NOT_NEEDED"
             elif authenticate and (not username or not password):
