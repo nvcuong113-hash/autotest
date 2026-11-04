@@ -451,7 +451,9 @@ def test_application_profile_registry_loads_oap_meta():
     assert profile["authentication"]["session_probe"]["path"] == "/api/v1/auth/me"
     assert profile["pages"]["ccm.guarantee.list"]["path"].endswith("TRM_GUARANTEE_LIST")
     summary = get_profile_mapping_summary(profile)
-    assert summary["verified_target_count"] == 3
+    assert summary["verified_target_count"] == 0
+    assert summary["verified_auth_target_count"] == 3
+    assert summary["unmapped_page_count"] == 1
     assert summary["page_count"] == 1
 
 
