@@ -42,7 +42,7 @@ Set these Environment Variables:
 - `RUNNER_URL` = public HTTPS URL of the Browser Runner service, e.g. `https://oap-autotest-runner.onrender.com`
 - `RUNNER_API_TOKEN` = the private token generated above
 
-The UI Dockerfile is `./Dockerfile`. It no longer installs Chromium or Playwright.
+The UI Dockerfile is `./Dockerfile`. It no longer installs Chromium or Playwright. The Runner Dockerfile is `./Dockerfile.runner` and installs only Playwright's Chromium headless shell (`playwright install chromium --only-shell`) to reduce the browser footprint on the 512 MB Free instance. It also bounds V8 heap, diagnostic buffers, DOM/frame collection and uses an 800x600 viewport.
 
 ## 4. Create a separate Browser Runner Web Service
 
@@ -66,7 +66,7 @@ The runner processes one browser job at a time and rejects batches larger than f
 
 ## 5. Verify
 
-1. Open `https://<runner-host>.onrender.com/health`. It should return JSON with `ok: true`, `database_configured: true`, and `token_configured: true`.
+1. Open `https://<runner-host>.onrender.com/health`. It should return JSON with `ok: true`, `database_configured: true`, and `token_configured: true`. The endpoint also reports `peak_process_rss_mb` and `browser_job_active` for runtime memory diagnostics.
 2. Confirm the UI service Environment Variables are saved and redeploy both services.
 3. Open the UI. The sidebar should show PostgreSQL and Browser Runner as configured.
 4. Confirm the project and 75 test cases have been seeded.
