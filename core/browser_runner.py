@@ -384,12 +384,13 @@ def _submit_username_password_login(page: Any, username: str, password: str) -> 
         return {"attempted": True, "result": "SUBMISSION_ERROR", "error_type": type(exc).__name__}
 
 def inspect_page(target_url: str, base_url: str, headless: bool = True,
-                 username: str = "", password: str = "", authenticate: bool = False) -> dict[str, Any]:
+                 username: str = "", password: str = "", authenticate: bool = False,
+                 application_profile: dict[str, Any] | None = None) -> dict[str, Any]:
     """Read-only page inspection with SPA/authentication polling and network diagnostics."""
     if not base_url.strip():
         raise ValueError("Cần cấu hình Base URL trước khi kiểm tra.")
     url = _resolve_url(target_url.strip() or base_url.strip(), base_url.strip())
-    initial_url = _inspection_start_url(url, base_url.strip(), authenticate)
+    initial_url = url if (authenticate and application_profile) else _inspection_start_url(url, base_url.strip(), authenticate)
     parsed = urlparse(url)
     if parsed.username or parsed.password:
         raise ValueError("Không đưa thông tin đăng nhập vào URL.")
@@ -468,6 +469,32 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                 if route.request.resource_type in {"image", "font", "media"}
                 else route.continue_(),
             )
+            profile_auth_ok = False
+            profile_auth_error = ""
+            if authenticate and application_profile:
+                try:
+                    auth_result = ensure_authenticated(
+                        context,
+                        application_profile,
+                        base_url.strip(),
+                        username=username,
+                        password=password,
+                    )
+                    profile_auth_ok = bool(auth_result.get("authenticated"))
+                    if profile_auth_ok:
+                        auth_config = application_profile.get("authentication") or {}
+                        probe = auth_config.get("session_probe") or {}
+                        probe_url = urljoin(base_url.rstrip("/") + "/", str(probe.get("path") or "").lstrip("/"))
+                        api_responses.append({
+                            "url": safe_url(probe_url),
+                            "status": int(probe.get("success_status") or 200),
+                            "resource_type": "xhr",
+                            "method": "GET",
+                            "authentication_probe": True,
+                        })
+                except AuthenticationError as exc:
+                    profile_auth_error = str(exc)
+
 
             def on_response(response: Any) -> None:
                 try:
@@ -568,7 +595,20 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             final_url = snapshot.get("final_url") or (page.url if not page.is_closed() else "")
             auth_state = _classify_auth_state(final_url, api_responses, final_body)
             login_diagnostic = {"attempted": False, "result": "NOT_REQUESTED"}
-            if authenticate and auth_state["authentication_required"]:
+            if authenticate and application_profile:
+                login_diagnostic = {
+                    "attempted": True,
+                    "result": "AUTHENTICATED" if profile_auth_ok else "LOGIN_NOT_CONFIRMED",
+                    "strategy": (application_profile.get("authentication") or {}).get("strategy", ""),
+                }
+                if profile_auth_error:
+                    login_diagnostic["message"] = profile_auth_error[:240]
+                    login_diagnostic["error_type"] = "AuthenticationError"
+                if not profile_auth_ok:
+                    auth_state["authentication_required"] = True
+                    auth_state["authenticated"] = False
+                    auth_state["authentication_state"] = "LOGIN_REQUIRED"
+            elif authenticate and auth_state["authentication_required"]:
                 login_route = _navigate_to_login_page(page, base_url)
                 login_diagnostic = {
                     "attempted": False,
@@ -647,6 +687,10 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             final_url = snapshot.get("final_url") or (page.url if not page.is_closed() else "")
             auth_state = _classify_auth_state(final_url, api_responses, final_body,
                                               login_attempted=login_diagnostic.get("attempted", False))
+            if authenticate and application_profile and not profile_auth_ok:
+                auth_state["authentication_required"] = True
+                auth_state["authenticated"] = False
+                auth_state["authentication_state"] = "LOGIN_REQUIRED"
             if "page_readiness" not in locals():
                 if auth_state.get("authenticated") or not authenticate:
                     snapshot, page_readiness = _wait_for_business_page(
@@ -715,6 +759,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             return {
                 "requested_url":url,
                 "inspection_start_url":initial_url,
+                "application_profile_id": str((application_profile or {}).get("profile_id") or ""),
                 "final_url":final_url,
                 "http_status":document_responses[-1]["status"] if document_responses else None,
                 "title":snapshot.get("title", ""),
