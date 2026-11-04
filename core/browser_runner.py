@@ -70,6 +70,26 @@ def _evaluate_with_navigation_retry(page: Any, script: str, attempts: int = 6) -
     raise RuntimeError("Không thể đọc DOM sau nhiều lần thử.")
 
 
+def _classify_auth_state(final_url: str, api_responses: list[dict[str, Any]], body_text: str) -> dict[str, Any]:
+    """Classify whether the inspected app is waiting for auth or has been redirected to login."""
+    path = urlparse(final_url).path.rstrip("/").lower()
+    login_path = path.endswith("/login") or path.endswith("/signin") or path.endswith("/sign-in")
+    auth_api_401 = any(
+        int(item.get("status", 0)) == 401
+        and ("/auth/me" in str(item.get("url", "")).lower() or "/api/v1/auth/" in str(item.get("url", "")).lower())
+        for item in api_responses
+    )
+    pending = "checking authentication" in body_text.lower() or "đang kiểm tra xác thực" in body_text.lower()
+    required = login_path or auth_api_401
+    state = "LOGIN_REQUIRED" if required else ("AUTH_PENDING" if pending else "AUTH_STATE_UNKNOWN")
+    return {
+        "authentication_required": required,
+        "authentication_pending": pending and not required,
+        "authentication_state": state,
+        "auth_api_401": auth_api_401,
+        "redirected_to_login": login_path,
+    }
+
 def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[str, Any]:
     """Read-only page inspection with SPA/authentication polling and network diagnostics."""
     if not base_url.strip():
@@ -206,34 +226,62 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[
                     break
 
             final_body = str(snapshot.get("body_text_preview", ""))
-            authentication_pending = (
-                "checking authentication" in final_body.lower()
-                or "đang kiểm tra xác thực" in final_body.lower()
-            )
-            screenshot_saved = False
-            for attempt in range(3):
-                try:
-                    page.screenshot(path=screenshot_path, full_page=True, timeout=10000)
-                    screenshot_saved = True
-                    break
-                except Exception as exc:
-                    navigation_errors.append(f"Chụp màn hình lần {attempt + 1}: {type(exc).__name__}: {exc}")
-                    if page.is_closed():
-                        break
+            final_url = snapshot.get("final_url") or (page.url if not page.is_closed() else "")
+            auth_state = _classify_auth_state(final_url, api_responses, final_body)
+
+            # Inspect each frame separately: enterprise SSO pages may render controls in an iframe.
+            frame_diagnostics: list[dict[str, Any]] = []
+            if not page.is_closed():
+                for frame_index, frame in enumerate(page.frames):
                     try:
-                        page.wait_for_timeout(500)
-                    except Exception:
-                        pass
+                        frame_data = frame.evaluate("""() => {
+                            const clean = value => (value || '').trim().replace(/\\s+/g, ' ');
+                            return {
+                                title: document.title || '',
+                                url: location.href,
+                                body_text_preview: clean(document.body ? document.body.innerText : '').slice(0, 1200),
+                                inputs: Array.from(document.querySelectorAll('input,textarea,select')).map((el, i) => ({
+                                    index: i, tag: el.tagName.toLowerCase(),
+                                    type: el.getAttribute('type') || el.tagName.toLowerCase(),
+                                    id: el.id || '', name: el.getAttribute('name') || '',
+                                    placeholder: el.getAttribute('placeholder') || '',
+                                    aria_label: el.getAttribute('aria-label') || '',
+                                    disabled: !!el.disabled
+                                })),
+                                buttons: Array.from(document.querySelectorAll('button,[role="button"],input[type="submit"]')).map((el, i) => ({
+                                    index: i, text: clean(el.innerText || el.value || el.textContent).slice(0,120),
+                                    aria_label: el.getAttribute('aria-label') || '',
+                                    type: el.getAttribute('type') || ''
+                                }))
+                            };
+                        }""")
+                        frame_diagnostics.append({"frame_index":frame_index, **frame_data})
+                    except Exception as exc:
+                        frame_diagnostics.append({
+                            "frame_index":frame_index, "url":frame.url,
+                            "inspection_error":f"{type(exc).__name__}: {exc}"[:300]
+                        })
+
+            screenshot_saved = False
+            try:
+                page.screenshot(
+                    path=screenshot_path, full_page=False, timeout=15000,
+                    animations="disabled", caret="hide"
+                )
+                screenshot_saved = True
+            except Exception as exc:
+                navigation_errors.append(f"Chụp màn hình: {type(exc).__name__}: {exc}")
             if not screenshot_saved:
                 screenshot_path = ""
 
             return {
                 "requested_url":url,
-                "final_url":snapshot.get("final_url") or (page.url if not page.is_closed() else ""),
+                "final_url":final_url,
                 "http_status":document_responses[-1]["status"] if document_responses else None,
                 "title":snapshot.get("title", ""),
                 "ready_state":snapshot.get("ready_state", "unknown"),
-                "authentication_pending":authentication_pending,
+                **auth_state,
+                "frame_diagnostics":frame_diagnostics,
                 "headings":snapshot.get("headings", []),
                 "forms":snapshot.get("forms", []),
                 "inputs":snapshot.get("inputs", []),
