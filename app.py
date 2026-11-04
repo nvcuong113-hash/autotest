@@ -828,20 +828,36 @@ with tab_run:
     st.warning("Chỉ kiểm thử hệ thống được phép truy cập. Hãy rà soát selector và dữ liệu test; không chạy thao tác phá hủy hoặc dùng dữ liệu production.")
     enabled_cases = [c for c in list_test_cases(pid) if c["enabled"]]
     if enabled_cases:
-        options = [c["case_key"] for c in enabled_cases]
-        default = []
-        for c in enabled_cases:
-            try:
-                steps = json.loads(c["steps_json"])
-                if c.get("automation_level") == "automatable" and not any(
-                    step.get("action") == "manual" for step in steps
-                ):
-                    default.append(c["case_key"])
-            except Exception:
-                pass
-        chosen = st.multiselect("Chọn Test Case cần thực thi (tối đa 5 mỗi lượt)", options, default=default[:5], max_selections=5)
-        st.caption("Test Case còn bước thủ công sẽ được đánh dấu BỊ CHẶN, không tự chạy bằng selector phỏng đoán.")
-        if st.button("▶ Chạy các Test Case đã chọn", type="primary", disabled=(not chosen or not runner_configured)):
+        run_assessments = assess_cases(enabled_cases, application_profile)
+        run_assessment_by_key = {item["case_key"]: item for item in run_assessments}
+        ready_cases = [
+            case for case in enabled_cases
+            if run_assessment_by_key.get(case["case_key"], {}).get("status") == "READY"
+            and case.get("automation_level") == "automatable"
+        ]
+        options = [c["case_key"] for c in ready_cases]
+        previously_blocked = {
+            str(item.get("case_key") or "")
+            for item in results if item.get("status") == "BLOCKED"
+        }
+        default = [key for key in options if key in previously_blocked][:5]
+        if not ready_cases:
+            st.warning(
+                f"Chưa có Test Case đủ điều kiện chạy. {len(enabled_cases)} case đang bật; "
+                f"{sum(item['status'] == 'BLOCKED' for item in run_assessments)} case còn BLOCKED. "
+                "Mở tab Mapping & Coverage, xử lý lý do bị chặn rồi bấm Đánh giá lại."
+            )
+        chosen = st.multiselect(
+            "Chọn Test Case đủ điều kiện thực thi / chạy lại (tối đa 5 mỗi lượt)",
+            options,
+            default=default,
+            max_selections=5,
+        )
+        st.caption(
+            "Chỉ hiển thị case đã có workflow, mapping đã xác minh và assertion. "
+            "Các case BLOCKED không được gửi sang Runner."
+        )
+        if st.button("▶ Chạy / chạy lại các Test Case đã chọn", type="primary", disabled=(not chosen or not runner_configured)):
             if not base_url.strip():
                 st.error("Nhập địa chỉ hệ thống (Base URL) ở thanh bên.")
             else:
@@ -850,6 +866,7 @@ with tab_run:
                     outcome = run_suite(
                         pid, base_url.strip(), selection, username, password, headless,
                         application_profile_id=application_profile_id,
+                        profile_mappings=mapping_records,
                     )
                 st.session_state["last_run"] = outcome
                 st.rerun()
