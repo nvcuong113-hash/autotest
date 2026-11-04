@@ -102,3 +102,43 @@ def get_profile_mapping_summary(profile: dict[str, Any]) -> dict[str, int]:
         "unmapped_or_unverified_count": pending_targets,
         "unmapped_page_count": pending_pages,
     }
+
+
+ALLOWED_LOCATOR_STRATEGIES = {"css", "role", "label", "placeholder", "text"}
+
+
+def merge_profile_mappings(
+    profile: dict[str, Any],
+    mappings: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Apply project-scoped, reviewed business mappings without mutating the base profile."""
+    merged = json.loads(json.dumps(profile))
+    for item in mappings or []:
+        page_id = str(item.get("page_id") or "").strip()
+        target_id = str(item.get("target_id") or "").strip()
+        strategy = str(item.get("locator_by") or item.get("by") or "").strip().lower()
+        value = str(item.get("locator_value") or item.get("value") or "").strip()
+        if not target_id or target_id.startswith("auth."):
+            raise ApplicationProfileError("Không được tạo hoặc ghi đè target xác thực qua mapping nghiệp vụ.")
+        if strategy not in ALLOWED_LOCATOR_STRATEGIES or not value:
+            raise ApplicationProfileError(
+                f"Mapping '{target_id}' thiếu locator hợp lệ hoặc strategy không được hỗ trợ."
+            )
+        definition = {
+            "by": strategy,
+            "value": value,
+            "name": str(item.get("locator_name") or item.get("name") or "").strip() or None,
+            "exact": bool(item.get("exact", True)),
+            "verified": bool(item.get("verified", False)),
+            "evidence": str(item.get("evidence") or "").strip(),
+            "purpose": "business",
+            "source": "project_mapping",
+        }
+        if page_id:
+            pages = merged.setdefault("pages", {})
+            if page_id not in pages or not isinstance(pages[page_id], dict):
+                raise ApplicationProfileError(f"Mapping '{target_id}' tham chiếu page không tồn tại: {page_id}.")
+            pages[page_id].setdefault("targets", {})[target_id] = definition
+        else:
+            merged.setdefault("shared_targets", {})[target_id] = definition
+    return merged
