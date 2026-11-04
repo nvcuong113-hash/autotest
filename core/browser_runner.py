@@ -25,7 +25,8 @@ CHROMIUM_ARGS = [
     "--disable-default-apps",
     "--disable-breakpad",
     "--disable-component-update",
-    "--disable-features=Translate,BackForwardCache,MediaRouter",
+    "--disable-features=Translate,BackForwardCache,MediaRouter,PaintHolding",
+    "--js-flags=--max-old-space-size=128",
     "--renderer-process-limit=1",
     "--no-zygote",
     "--metrics-recording-only",
@@ -34,7 +35,15 @@ CHROMIUM_ARGS = [
 
 
 def _launch_low_memory_browser(playwright: Any, headless: bool = True) -> Any:
-    return playwright.chromium.launch(headless=headless, args=CHROMIUM_ARGS)
+    # Use Playwright's dedicated headless shell (installed with --only-shell).
+    return playwright.chromium.launch(headless=True, args=CHROMIUM_ARGS, timeout=30000)
+
+
+def _append_limited(items: list[Any], item: Any, limit: int = 100) -> None:
+    """Keep diagnostic event buffers bounded on busy enterprise SPAs."""
+    if len(items) >= limit:
+        del items[: max(1, limit // 4)]
+    items.append(item)
 
 
 class ManualStepRequired(Exception):
@@ -310,7 +319,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             if (aria) return tag + '[aria-label="' + String(aria).replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"') + '"]';
             return '';
         };
-        const inputs = Array.from(document.querySelectorAll('input, textarea, select')).map((el, i) => {
+        const inputs = Array.from(document.querySelectorAll('input, textarea, select')).slice(0, 120).map((el, i) => {
             const tag = el.tagName.toLowerCase();
             const labels = el.labels ? Array.from(el.labels).map(x => clean(x.innerText || x.textContent)).filter(Boolean) : [];
             return {index:i, tag, type:clean(el.getAttribute('type') || (tag === 'textarea' ? 'textarea' : tag)).toLowerCase(),
@@ -318,21 +327,21 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                 aria_label:el.getAttribute('aria-label') || '', labels, required:!!el.required, disabled:!!el.disabled,
                 suggested_selector:selectorFor(el, tag)};
         });
-        const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]')).map((el, i) => {
+        const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]')).slice(0, 120).map((el, i) => {
             const tag = el.tagName.toLowerCase();
             return {index:i, tag, text:clean(el.innerText || el.value || el.textContent).slice(0,160),
                 aria_label:el.getAttribute('aria-label') || '', title:el.getAttribute('title') || '',
                 type:el.getAttribute('type') || '', disabled:!!el.disabled, suggested_selector:selectorFor(el, tag)};
         });
-        const headings = Array.from(document.querySelectorAll('h1, h2, h3')).slice(0,80)
+        const headings = Array.from(document.querySelectorAll('h1, h2, h3')).slice(0,40)
             .map(el => ({level:el.tagName.toLowerCase(), text:clean(el.innerText || el.textContent).slice(0,200)})).filter(x => x.text);
         const forms = Array.from(document.querySelectorAll('form')).map((el, i) => ({index:i,
             method:(el.getAttribute('method') || 'get').toUpperCase(), action:el.action || '', id:el.id || '', name:el.getAttribute('name') || ''}));
-        const links = Array.from(document.querySelectorAll('a[href]')).slice(0,100).map((el, i) => ({
+        const links = Array.from(document.querySelectorAll('a[href]')).slice(0,60).map((el, i) => ({
             index:i, text:clean(el.innerText || el.textContent).slice(0,120), href:el.href}));
         return {title:document.title || '', final_url:location.href, ready_state:document.readyState,
             headings, forms, inputs, buttons, links,
-            body_text_preview:clean(document.body ? document.body.innerText : '').slice(0,2500)};
+            body_text_preview:clean(document.body ? document.body.innerText : '').slice(0,1600)};
     }'''
 
     def safe_url(raw_url: str) -> str:
@@ -342,7 +351,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
     with sync_playwright() as playwright:
         browser = _launch_low_memory_browser(playwright, headless)
         try:
-            context = browser.new_context(viewport={"width":1024,"height":768}, device_scale_factor=1, service_workers="block")
+            context = browser.new_context(viewport={"width":800,"height":600}, device_scale_factor=1, service_workers="block", reduced_motion="reduce")
             page = context.new_page()
             page.set_default_timeout(8000)
             # Static media does not affect DOM/selector discovery and can consume
@@ -373,29 +382,29 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                             bool(headers.get("set-cookie")),
                         )
                     if request.resource_type == "document":
-                        document_responses.append(entry)
+                        _append_limited(document_responses, entry, 30)
                     elif request.resource_type in {"xhr", "fetch"}:
-                        api_responses.append(entry)
+                        _append_limited(api_responses, entry, 60)
                 except Exception:
                     pass
 
             def on_request_failed(request: Any) -> None:
                 try:
-                    failed_requests.append({"url":safe_url(request.url), "method":request.method,
+                    _append_limited(failed_requests, {"url":safe_url(request.url), "method":request.method,
                                             "resource_type":request.resource_type,
-                                            "failure":str(request.failure or "Unknown failure")[:300]})
+                                            "failure":str(request.failure or "Unknown failure")[:300]}, 30)
                 except Exception:
                     pass
 
             def on_console(message: Any) -> None:
                 try:
                     if message.type == "error":
-                        console_errors.append(str(message.text)[:500])
+                        _append_limited(console_errors, str(message.text)[:300], 20)
                 except Exception:
                     pass
 
             def on_page_error(error: Any) -> None:
-                page_errors.append(str(error)[:500])
+                _append_limited(page_errors, str(error)[:300], 15)
 
             page.on("response", on_response)
             page.on("requestfailed", on_request_failed)
@@ -530,7 +539,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             # Inspect each frame separately: enterprise SSO pages may render controls in an iframe.
             frame_diagnostics: list[dict[str, Any]] = []
             if not page.is_closed():
-                for frame_index, frame in enumerate(page.frames):
+                for frame_index, frame in enumerate(page.frames[:3]):
                     try:
                         frame_data = frame.evaluate("""() => {
                             const clean = value => (value || '').trim().replace(/\\s+/g, ' ');
@@ -563,7 +572,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             screenshot_saved = False
             try:
                 page.screenshot(
-                    path=screenshot_path, full_page=False, timeout=15000,
+                    path=screenshot_path, full_page=False, timeout=5000,
                     animations="disabled", caret="hide"
                 )
                 screenshot_saved = True
@@ -676,7 +685,7 @@ def run_suite(project_id: int, base_url: str, cases: list[dict[str, Any]],
                     context = page = None
                     screenshot_path = ""
                     try:
-                        context = browser.new_context(viewport={"width": 1024, "height": 768}, device_scale_factor=1, service_workers="block")
+                        context = browser.new_context(viewport={"width": 800, "height": 600}, device_scale_factor=1, service_workers="block", reduced_motion="reduce")
                         page = context.new_page()
                         page.set_default_timeout(7000)
                         status, message, screenshot_path = execute_case(case, page, base_url.strip(), username, password)
