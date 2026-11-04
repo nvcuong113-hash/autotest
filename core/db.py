@@ -178,3 +178,23 @@ def list_results(project_id: int, db_path: str | None = None) -> list[dict[str, 
         return [dict(x) for x in conn.execute("""SELECT tr.*,tc.case_key,tc.title AS case_title,ru.base_url
             FROM test_results tr JOIN test_runs ru ON ru.id=tr.run_id
             JOIN test_cases tc ON tc.id=tr.case_id WHERE ru.project_id=? ORDER BY tr.id DESC""", (project_id,))]
+
+
+# Use durable PostgreSQL whenever DATABASE_URL is supplied by the hosting platform.
+# SQLite remains available for local development and isolated unit tests.
+if os.getenv("DATABASE_URL", "").strip():
+    from core.pg_db import (
+        add_test_cases,
+        create_project,
+        create_run,
+        finish_run,
+        init_db,
+        list_projects,
+        list_requirements,
+        list_results,
+        list_runs,
+        list_test_cases,
+        save_requirements,
+        save_result,
+        update_test_case,
+    )
