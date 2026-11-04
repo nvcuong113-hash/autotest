@@ -60,7 +60,11 @@ def parse_json_response(text: str) -> Any:
     raw = str(text or "").strip()
     if not raw:
         raise AIProviderError("Gemini trả về nội dung rỗng.")
-    raw = re.sub(r"^\`\`\`(?:json)?\\s*|\\s*\`\`\`$", "", raw, flags=re.IGNORECASE).strip()
+    if raw.startswith("```"):
+        raw = raw[3:]
+        if raw[:4].lower() == "json":
+            raw = raw[4:]
+        raw = raw.removesuffix("```").strip()
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
