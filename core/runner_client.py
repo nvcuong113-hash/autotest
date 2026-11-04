@@ -35,7 +35,12 @@ def _runner_request(path: str, payload: dict[str, Any], timeout: int) -> dict[st
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         # Do not echo request payloads or credentials in UI errors.
-        raise RuntimeError(f"Browser Runner trả HTTP {exc.code}. Kiểm tra trạng thái dịch vụ Runner.") from None
+        if exc.code in {502, 503, 504}:
+            raise RuntimeError(
+                f"Browser Runner trả HTTP {exc.code}; instance có thể đang restart hoặc thiếu RAM. "
+                "Kiểm tra Runner Events/Logs trước khi thử lại."
+            ) from None
+        raise RuntimeError(f"Browser Runner trả HTTP {exc.code}. Kiểm tra cấu hình dịch vụ Runner.") from None
     except (urllib.error.URLError, TimeoutError) as exc:
         raise RuntimeError(f"Không kết nối được Browser Runner ({type(exc).__name__}).") from None
     if not isinstance(result, dict):
