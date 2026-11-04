@@ -4,11 +4,45 @@ import base64
 import json
 import os
 import tempfile
+from datetime import date, datetime, time as datetime_time
+from decimal import Decimal
+from enum import Enum
+from uuid import UUID
 import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any
+
+
+def _json_default(value: Any) -> Any:
+    """Convert database/domain values to lossless JSON-compatible values."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, (date, datetime_time)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        # Preserve decimal precision (e.g. financial amounts) rather than
+        # silently converting to a potentially lossy binary float.
+        return str(value)
+    if isinstance(value, (UUID, Path, os.PathLike)):
+        return str(value)
+    if isinstance(value, Enum):
+        return value.value
+    # Support scalar types from optional data libraries (e.g. NumPy/Pandas)
+    # without making those libraries runtime dependencies of the client.
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            scalar = item()
+            if scalar is not value:
+                return scalar
+        except (TypeError, ValueError):
+            pass
+    raise TypeError(
+        f"Object of type {type(value).__name__} is not JSON serializable "
+        "for the Browser Runner request."
+    )
 
 
 def _runner_request(path: str, payload: dict[str, Any], timeout: int) -> dict[str, Any]:
@@ -19,7 +53,12 @@ def _runner_request(path: str, payload: dict[str, Any], timeout: int) -> dict[st
             "Chưa cấu hình Browser Runner. Cần đặt RUNNER_URL và RUNNER_API_TOKEN "
             "trong Environment của dịch vụ AutoTest."
         )
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    body = json.dumps(
+        payload,
+        ensure_ascii=False,
+        default=_json_default,
+        allow_nan=False,
+    ).encode("utf-8")
     request = urllib.request.Request(
         f"{base_url}{path}",
         data=body,
