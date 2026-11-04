@@ -502,7 +502,11 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
                     elif auth_state["mfa_required"]:
                         login_diagnostic["result"] = "MFA_REQUIRED"
                     else:
-                        login_diagnostic["result"] = "LOGIN_NOT_CONFIRMED"
+                        summary = login_diagnostic.get("login_api_response", {})
+                        if summary.get("success") is False or summary.get("error_code") or _http_status(latest_login_event or {}) >= 400:
+                            login_diagnostic["result"] = "LOGIN_REJECTED"
+                        else:
+                            login_diagnostic["result"] = "LOGIN_NOT_CONFIRMED"
                     try:
                         login_diagnostic["storage_metadata"] = page.evaluate(
                             """() => ({
