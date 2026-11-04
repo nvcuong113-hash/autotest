@@ -295,7 +295,20 @@ with tab_run:
             st.caption("Trạng thái xác thực: " + str(inspection.get("authentication_state", "UNKNOWN")))
             login_result = inspection.get("login_diagnostic", {}).get("result", "NOT_REQUESTED")
             if login_result == "AUTHENTICATED":
-                st.success("Đăng nhập OAP Meta thành công. Đã mở lại URL màn hình nghiệp vụ cần kiểm tra.")
+                st.success("Đăng nhập OAP Meta thành công. Phiên đã được xác nhận bằng API /auth/me.")
+                page_readiness = inspection.get("business_page_readiness", {})
+                if inspection.get("business_page_ready"):
+                    st.success("Màn hình nghiệp vụ đã tải xong và DOM ổn định.")
+                else:
+                    st.warning(
+                        "Đăng nhập thành công nhưng nội dung module chưa tải xong hoặc chưa nhận diện được. "
+                        "Trạng thái: " + str(page_readiness.get("state", "UNKNOWN"))
+                    )
+                    st.caption(
+                        "Bảng: " + str(page_readiness.get("table_count", 0))
+                        + " · Dòng dữ liệu: " + str(page_readiness.get("data_row_count", 0))
+                        + " · Loading indicator: " + str(page_readiness.get("loading_indicator_count", 0))
+                    )
             elif login_result == "MFA_REQUIRED":
                 st.warning("OAP Meta yêu cầu thêm OTP hoặc xác thực nhiều lớp. Inspector chưa tự xử lý bước này.")
             elif login_result == "LOGIN_REJECTED":
@@ -352,10 +365,24 @@ with tab_run:
                             st.write("Nút trong frame")
                             st.dataframe(pd.DataFrame(frame["buttons"]).rename(columns={"index":"STT","text":"Nội dung nút","aria_label":"Nhãn","type":"Kiểu"}), use_container_width=True, hide_index=True)
             api_rows = inspection.get("api_responses", [])
+            api_failures = [item for item in api_rows if int(item.get("status", 0) or 0) >= 400]
+            if api_failures:
+                st.warning("Có " + str(len(api_failures)) + " API/XHR trả HTTP 4xx/5xx. Mở bảng request bên dưới để xác định endpoint lỗi.")
             if api_rows:
                 with st.expander("Các request API/XHR của OAP Meta", expanded=True):
                     api_view = pd.DataFrame(api_rows).rename(columns={"url":"Địa chỉ API","status":"HTTP","resource_type":"Loại","method":"Phương thức"})
                     st.dataframe(api_view, use_container_width=True, hide_index=True)
+            blocked_static = inspection.get("blocked_static_resources", [])
+            if blocked_static:
+                counts = {}
+                for item in blocked_static:
+                    kind = str(item.get("resource_type", "other"))
+                    counts[kind] = counts.get(kind, 0) + 1
+                st.caption(
+                    "Đã bỏ qua có chủ đích tài nguyên tĩnh để tiết kiệm RAM: "
+                    + ", ".join(f"{key}: {value}" for key, value in sorted(counts.items()))
+                    + ". Đây không được tính là lỗi API."
+                )
             failed_rows = inspection.get("failed_requests", [])
             if failed_rows:
                 with st.expander("Các request không tải được", expanded=True):
