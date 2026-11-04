@@ -76,7 +76,7 @@ Set these variables on the `oap-autotest-ccm` Render service:
 
 Do not add the Gemini key to the Browser Runner service. The UI service calls Gemini for SRS extraction and Test Case design; the Runner only executes browser workflows.
 
-The model ID is the stable Gemini API model code `gemini-3.5-flash-lite`. Gemini's free tier still has request/rate quotas. When quota is exhausted, AutoTest shows a quota message; it does not silently switch providers or fabricate AI output.
+The model ID is the stable Gemini API model code `gemini-3.5-flash-lite`. Its Free Tier offers free input/output tokens but still has request/rate quotas. When quota is exhausted, AutoTest shows a quota message; it does not silently switch providers or fabricate AI output. Google states that Free Tier content may be used to improve its products. Do not send confidential bank documents, customer data, credentials or other restricted information through the Free Tier unless your organization's policy explicitly permits it; use a sanitized copy.
 
 ## 6. Verify
 
