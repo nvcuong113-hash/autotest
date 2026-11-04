@@ -120,8 +120,11 @@ with st.sidebar:
     st.caption(
         f"Profile v{application_profile.get('version', '1.0.0')} · "
         f"{mapping_summary['page_count']} màn hình · "
-        f"{mapping_summary['verified_target_count']} target đã xác minh"
+        f"{mapping_summary['verified_business_target_count']} target nghiệp vụ đã xác minh · "
+        f"{mapping_summary['unmapped_page_count']} màn hình cần mapping"
     )
+    if mapping_summary["unmapped_page_count"]:
+        st.warning("Application Profile chưa hoàn tất mapping màn hình nghiệp vụ. Test Case cần target chưa xác minh sẽ được đánh dấu BỊ CHẶN, không tự đoán selector.")
     st.caption("Cấu hình kiểm thử trình duyệt")
     base_url = st.text_input(
         "Địa chỉ hệ thống (Base URL)",
