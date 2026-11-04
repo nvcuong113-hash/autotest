@@ -298,8 +298,10 @@ with tab_run:
                 st.success("Đăng nhập OAP Meta thành công. Đã mở lại URL màn hình nghiệp vụ cần kiểm tra.")
             elif login_result == "MFA_REQUIRED":
                 st.warning("OAP Meta yêu cầu thêm OTP hoặc xác thực nhiều lớp. Inspector chưa tự xử lý bước này.")
+            elif login_result == "LOGIN_REJECTED":
+                st.error("OAP Meta đã từ chối thông tin đăng nhập. Xem phản hồi API đăng nhập bên dưới để biết nguyên nhân.")
             elif login_result == "LOGIN_NOT_CONFIRMED":
-                st.error("Đã gửi form đăng nhập nhưng chưa xác nhận được phiên đăng nhập. Kiểm tra thông tin test hoặc phản hồi xác thực.")
+                st.error("Đã gửi form đăng nhập nhưng chưa xác nhận được phiên đăng nhập. Xem phản hồi API và trạng thái /auth/me bên dưới.")
             elif login_result == "LOGIN_FORM_NOT_FOUND":
                 st.error("Không tìm thấy đầy đủ trường Tên đăng nhập, Mật khẩu và nút Đăng nhập trong trang hiện tại.")
             elif login_result == "MISSING_CREDENTIALS":
