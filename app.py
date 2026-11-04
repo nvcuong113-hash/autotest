@@ -278,7 +278,7 @@ with tab_cases:
         if st.button("Sinh Test Case", type="primary", disabled=not selected_req):
             selected = [r for r in requirements if r["req_key"] in selected_req]
             try:
-                generated = generate_cases_with_ai(selected) if use_ai else generate_cases(selected)
+                generated = generate_cases_with_ai(selected, application_profile) if use_ai else generate_cases(selected)
                 count = add_test_cases(pid, generated)
                 st.success(f"Đã tạo thêm {count} Test Case. Hãy rà soát mức tự động hóa và mapping target trước khi chạy.")
                 st.rerun()
