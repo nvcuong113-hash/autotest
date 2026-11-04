@@ -37,6 +37,7 @@ def init_db(db_path: str | None = None) -> None:
           title TEXT NOT NULL,
           description TEXT NOT NULL,
           source TEXT DEFAULT '',
+          metadata_json TEXT NOT NULL DEFAULT '{}',
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(project_id, req_key)
         )
@@ -54,6 +55,7 @@ def init_db(db_path: str | None = None) -> None:
           steps_json TEXT NOT NULL DEFAULT '[]',
           expected_result TEXT DEFAULT '',
           source_ref TEXT DEFAULT '',
+          automation_level TEXT NOT NULL DEFAULT 'manual',
           enabled INTEGER NOT NULL DEFAULT 1,
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -85,6 +87,8 @@ def init_db(db_path: str | None = None) -> None:
         "CREATE INDEX IF NOT EXISTS idx_case_project ON test_cases(project_id)",
         "CREATE INDEX IF NOT EXISTS idx_result_run ON test_results(run_id)",
         "ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS source_ref TEXT DEFAULT ''",
+        "ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS automation_level TEXT NOT NULL DEFAULT 'manual'",
+        "ALTER TABLE requirements ADD COLUMN IF NOT EXISTS metadata_json TEXT NOT NULL DEFAULT '{}'",
     ]
     with connect() as conn:
         for statement in statements:
@@ -129,14 +133,25 @@ def save_requirements(project_id: int, items: list[dict[str, Any]], db_path: str
                 continue
             conn.execute(
                 """
-                INSERT INTO requirements(project_id,req_key,title,description,source)
-                VALUES (%s,%s,%s,%s,%s)
+                INSERT INTO requirements(project_id,req_key,title,description,source,metadata_json)
+                VALUES (%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(project_id,req_key) DO UPDATE SET
                   title=EXCLUDED.title,
                   description=EXCLUDED.description,
-                  source=EXCLUDED.source
+                  source=EXCLUDED.source,
+                  metadata_json=EXCLUDED.metadata_json
                 """,
-                (project_id, key, title, desc, str(item.get("source") or "")),
+                (
+                    project_id, key, title, desc, str(item.get("source") or ""),
+                    json.dumps(
+                        item.get("metadata") if isinstance(item.get("metadata"), dict) else {
+                            name: item.get(name) for name in (
+                                "actor", "preconditions", "business_rules", "acceptance_criteria", "source_ref"
+                            ) if item.get(name) not in (None, "", [])
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
             )
             saved += 1
     return saved
@@ -181,8 +196,8 @@ def add_test_cases(project_id: int, cases: list[dict[str, Any]], db_path: str | 
                 """
                 INSERT INTO test_cases
                   (project_id,requirement_id,case_key,title,test_type,priority,
-                   preconditions,steps_json,expected_result,source_ref)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   preconditions,steps_json,expected_result,source_ref,automation_level)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(case_key) DO NOTHING
                 """,
                 (
@@ -196,6 +211,7 @@ def add_test_cases(project_id: int, cases: list[dict[str, Any]], db_path: str | 
                     steps_json,
                     str(case.get("expected_result") or ""),
                     str(case.get("source_ref") or ""),
+                    str(case.get("automation_level") or "manual"),
                 ),
             )
             saved += int(cur.rowcount > 0)
