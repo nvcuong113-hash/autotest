@@ -17,7 +17,7 @@ try:
     import pandas as pd
 
     from core.ai_generator import generate_cases_with_ai
-    from core.browser_runner import inspect_page, run_suite
+    from core.runner_client import inspect_page, run_suite
     from core.db import (
         add_test_cases, create_project, init_db, list_projects, list_requirements,
         list_results, list_runs, list_test_cases, save_requirements, update_test_case,
@@ -29,6 +29,13 @@ try:
     print("[AUTOTEST_BOOT] imports completed", flush=True)
     init_db()
     Path("artifacts").mkdir(exist_ok=True)
+    if os.getenv("DATABASE_URL", "").strip() and not list_projects():
+        _seed_project_id = create_project(
+            "OAP Meta - CCM Bank Guarantee",
+            "Kiểm thử module Bảo lãnh CCM OAP Meta; dữ liệu mẫu được nạp từ BRD-CCM-GUARANTEE V1.0.",
+        )
+        _seed_result = import_guarantee_suite(_seed_project_id)
+        print(f"[AUTOTEST_BOOT] seeded default project and {_seed_result.get('case_count', 0)} test cases", flush=True)
     print("[AUTOTEST_BOOT] database initialized", flush=True)
 except Exception as exc:
     print("[AUTOTEST_BOOT] startup failed: " + repr(exc), flush=True)
@@ -77,8 +84,15 @@ with st.sidebar:
             except Exception as exc:
                 st.error(str(exc))
     st.divider()
-    st.caption("Cấu hình kiểm thử trình duyệt")
-    base_url = st.text_input("Địa chỉ hệ thống (Base URL)", placeholder="https://staging.example.com")
+    if os.getenv("DATABASE_URL", "").strip():
+        st.success("Cơ sở dữ liệu: PostgreSQL bền vững")
+    else:
+        st.warning("Đang dùng SQLite tạm trên Render Free. Dữ liệu có thể mất khi service restart; cần cấu hình DATABASE_URL.")
+    if os.getenv("RUNNER_URL", "").strip() and os.getenv("RUNNER_API_TOKEN", ""):
+        st.success("Browser Runner: đã cấu hình dịch vụ riêng")
+    else:
+        st.error("Browser Runner chưa được cấu hình. Không chạy Playwright trực tiếp trong Web Service 512 MB.")
+    st.caption("Cấu hình kiểm thử trình duyệt")    base_url = st.text_input("Địa chỉ hệ thống (Base URL)", placeholder="https://staging.example.com")
     username = st.text_input("Tài khoản kiểm thử", key="test_username")
     password = st.text_input("Mật khẩu kiểm thử", type="password", key="test_password")
     headless = st.checkbox("Chạy trình duyệt ẩn", value=True)
@@ -240,6 +254,7 @@ with tab_cases:
         st.info("Chưa có Test Case. Hãy nạp bộ kiểm thử bảo lãnh hoặc tạo từ danh sách yêu cầu.")
 
 with tab_run:
+    runner_configured = bool(os.getenv("RUNNER_URL", "").strip() and os.getenv("RUNNER_API_TOKEN", ""))
     st.subheader("Kiểm tra giao diện hệ thống (chỉ đọc)")
     with st.expander("Đọc cấu trúc màn hình Staging, không đăng nhập hoặc gửi biểu mẫu", expanded=True):
         inspect_url = st.text_input(
@@ -249,7 +264,7 @@ with tab_run:
         )
         st.caption("Công cụ chỉ làm việc trong tên miền Base URL. Khi bật đăng nhập, tài khoản sẽ được dùng để điền form đăng nhập OAP Meta; không lưu vào SQLite và không ghi ra log.")
         use_credentials_for_login = st.checkbox("Đăng nhập OAP Meta bằng tài khoản kiểm thử ở thanh bên", value=False, key=f"inspect_login_{pid}")
-        if st.button("Kiểm tra màn hình và thu thập selector", key=f"inspect_btn_{pid}", type="primary"):
+        if st.button("Kiểm tra màn hình và thu thập selector", key=f"inspect_btn_{pid}", type="primary", disabled=not runner_configured):
             if not base_url.strip():
                 st.error("Nhập địa chỉ gốc của hệ thống ở thanh bên, ví dụ https://oap-meta-staging.ovigroup.vn")
             elif not inspect_url.strip():
@@ -358,9 +373,9 @@ with tab_run:
                     default.append(c["case_key"])
             except Exception:
                 pass
-        chosen = st.multiselect("Chọn Test Case cần thực thi", options, default=default)
+        chosen = st.multiselect("Chọn Test Case cần thực thi (tối đa 5 mỗi lượt)", options, default=default[:5], max_selections=5)
         st.caption("Test Case còn bước thủ công sẽ được đánh dấu BỊ CHẶN, không tự chạy bằng selector phỏng đoán.")
-        if st.button("▶ Chạy các Test Case đã chọn", type="primary", disabled=not chosen):
+        if st.button("▶ Chạy các Test Case đã chọn", type="primary", disabled=(not chosen or not runner_configured)):
             if not base_url.strip():
                 st.error("Nhập địa chỉ hệ thống (Base URL) ở thanh bên.")
             else:
