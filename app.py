@@ -378,6 +378,7 @@ with tab_run:
                             inspect_url, base_url, headless=True,
                             username=username, password=password,
                             authenticate=use_credentials_for_login,
+                            application_profile_id=application_profile_id,
                         )
                 except Exception as exc:
                     st.error(f"Không thể kiểm tra màn hình: {type(exc).__name__}: {exc}")
