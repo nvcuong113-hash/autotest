@@ -11,7 +11,7 @@ ASSERTION_ACTIONS = {
 }
 TARGET_ACTIONS = {
     "click", "fill", "select_option", "check", "uncheck",
-    "expect_visible", "expect_hidden", "expect_text", "assert_state",
+    "expect_visible", "expect_hidden", "assert_state",
 }
 SUPPORTED_SEMANTIC_ACTIONS = {
     "navigate", "click", "fill", "select_option", "check", "uncheck",
