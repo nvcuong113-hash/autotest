@@ -13,6 +13,14 @@
     "session_probe": {
       "path": "/api/v1/auth/me",
       "success_status": 200
+    },
+    "post_login_readiness": {
+      "required_api": {
+        "path_contains": "/api/v1/auth/set-workspace",
+        "method": "POST",
+        "status": 200
+      },
+      "description": "Wait for the OAP Meta workspace initialization request observed after login; the session probe alone is not sufficient."
     }
   },
   "shared_targets": {
