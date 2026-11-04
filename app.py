@@ -22,7 +22,10 @@ Path("artifacts").mkdir(exist_ok=True)
 st.markdown("""<style>
 .block-container{padding-top:1.5rem;max-width:1500px}
 .hero{padding:1.2rem 1.4rem;border:1px solid rgba(128,128,128,.25);border-radius:14px;margin-bottom:1rem}
-.muted{color:#818891;font-size:.9rem}\n.metric-card{border:1px solid rgba(128,128,128,.25);border-radius:12px;padding:14px 16px;min-height:92px;background:var(--secondary-background-color)}\n.metric-label{color:#707780;font-size:.83rem;margin-bottom:8px}\n.metric-value{font-size:1.8rem;font-weight:700;line-height:1.1;color:var(--text-color)}
+.muted{color:#818891;font-size:.9rem}
+.metric-card{border:1px solid rgba(128,128,128,.25);border-radius:12px;padding:14px 16px;min-height:92px;background:var(--secondary-background-color)}
+.metric-label{color:#707780;font-size:.83rem;margin-bottom:8px}
+.metric-value{font-size:1.8rem;font-weight:700;line-height:1.1;color:var(--text-color)}
 </style>""", unsafe_allow_html=True)
 
 with st.sidebar:
@@ -132,7 +135,7 @@ with tab_cases:
     st.subheader("Tạo Test Case")
     with st.expander("Nạp bộ kiểm thử mẫu: CCM — Quản lý Bảo lãnh ngân hàng", expanded=False):
         suite_meta = load_guarantee_suite()
-        st.write("Source: **" + suite_meta["source_version"] + "** · "
+        st.write("Nguồn đặc tả: **" + suite_meta["source_version"] + "** · 
                  + str(len(suite_meta["requirements"])) + " nhóm yêu cầu · "
                  + str(len(suite_meta["test_cases"])) + " Test Case")
         st.caption("Các Test Case được biên soạn theo BRD. Bước thao tác đang để thủ công cho đến khi xác minh giao diện và selector.")
@@ -231,13 +234,13 @@ with tab_run:
             title_col.write("**Tiêu đề trang:** " + str(inspection.get("title") or "(trống)"))
             st.caption("URL cuối cùng: " + inspection.get("final_url", ""))
             st.write("**Tiêu đề trên màn hình**")
-            st.dataframe(pd.DataFrame(inspection.get("headings", [])), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(inspection.get("headings", [])).rename(columns={"level":"Cấp tiêu đề","text":"Nội dung"}), use_container_width=True, hide_index=True)
             st.write("**Trường nhập liệu và selector đề xuất**")
-            st.dataframe(pd.DataFrame(inspection.get("inputs", [])), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(inspection.get("inputs", [])).rename(columns={"index":"STT","tag":"Thẻ HTML","type":"Kiểu trường","id":"ID","name":"Tên trường","placeholder":"Gợi ý nhập","aria_label":"Nhãn truy cập","labels":"Nhãn liên kết","required":"Bắt buộc","disabled":"Vô hiệu hóa","suggested_selector":"Selector đề xuất"}), use_container_width=True, hide_index=True)
             st.write("**Nút bấm và selector đề xuất**")
-            st.dataframe(pd.DataFrame(inspection.get("buttons", [])), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(inspection.get("buttons", [])).rename(columns={"index":"STT","tag":"Thẻ HTML","text":"Nội dung nút","aria_label":"Nhãn truy cập","title":"Tiêu đề","type":"Kiểu nút","disabled":"Vô hiệu hóa","suggested_selector":"Selector đề xuất"}), use_container_width=True, hide_index=True)
             st.write("**Biểu mẫu**")
-            st.dataframe(pd.DataFrame(inspection.get("forms", [])), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(inspection.get("forms", [])).rename(columns={"index":"STT","method":"Phương thức","action":"Địa chỉ gửi","id":"ID","name":"Tên biểu mẫu"}), use_container_width=True, hide_index=True)
             if inspection.get("screenshot_path") and Path(inspection["screenshot_path"]).exists():
                 st.image(inspection["screenshot_path"], caption="Ảnh chụp màn hình (chế độ chỉ đọc)", use_container_width=True)
             st.download_button(
