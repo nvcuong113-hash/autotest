@@ -200,17 +200,68 @@ with tab_srs:
     extracted = st.session_state.get("srs_items", [])
     if extracted:
         st.write(f"**Tài liệu nguồn:** {st.session_state.get('srs_name','Tệp đã tải lên')}")
-        edited = st.data_editor(pd.DataFrame(extracted), use_container_width=True, hide_index=True,
-            num_rows="dynamic", key=f"req_editor_{pid}",
+        review_rows = []
+        for requirement in extracted:
+            raw_metadata = requirement.get("metadata_json") or requirement.get("metadata") or {}
+            if isinstance(raw_metadata, str):
+                try:
+                    metadata = json.loads(raw_metadata)
+                except json.JSONDecodeError:
+                    metadata = {}
+            else:
+                metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+            def _as_review_text(value):
+                if isinstance(value, list):
+                    return "\\n".join(str(item) for item in value)
+                return str(value or "")
+            review_rows.append({
+                "req_key": requirement.get("req_key", ""),
+                "title": requirement.get("title", ""),
+                "description": requirement.get("description", ""),
+                "source": requirement.get("source", ""),
+                "actor": metadata.get("actor", requirement.get("actor", "")),
+                "preconditions": _as_review_text(metadata.get("preconditions", requirement.get("preconditions", []))),
+                "business_rules": _as_review_text(metadata.get("business_rules", requirement.get("business_rules", []))),
+                "acceptance_criteria": _as_review_text(metadata.get("acceptance_criteria", requirement.get("acceptance_criteria", []))),
+                "source_ref": metadata.get("source_ref", requirement.get("source_ref", "")),
+            })
+        edited = st.data_editor(
+            pd.DataFrame(review_rows),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key=f"req_editor_{pid}",
             column_config={
                 "req_key": st.column_config.TextColumn("Mã yêu cầu", required=True),
                 "title": st.column_config.TextColumn("Tên yêu cầu", required=True),
                 "description": st.column_config.TextColumn("Mô tả yêu cầu", width="large", required=True),
                 "source": st.column_config.TextColumn("Nguồn"),
-            })
+                "actor": st.column_config.TextColumn("Actor / Vai trò"),
+                "preconditions": st.column_config.TextColumn("Điều kiện tiên quyết", width="large"),
+                "business_rules": st.column_config.TextColumn("Business Rules", width="large"),
+                "acceptance_criteria": st.column_config.TextColumn("Acceptance Criteria", width="large"),
+                "source_ref": st.column_config.TextColumn("Tham chiếu nguồn"),
+            },
+        )
         if st.button("Lưu danh sách yêu cầu đã rà soát", type="primary"):
-            count = save_requirements(pid, edited.to_dict("records"))
-            st.success(f"Đã lưu {count} yêu cầu.")
+            save_items = []
+            for row in edited.to_dict("records"):
+                metadata = {
+                    "actor": str(row.get("actor") or "").strip(),
+                    "preconditions": [line.strip() for line in str(row.get("preconditions") or "").splitlines() if line.strip()],
+                    "business_rules": [line.strip() for line in str(row.get("business_rules") or "").splitlines() if line.strip()],
+                    "acceptance_criteria": [line.strip() for line in str(row.get("acceptance_criteria") or "").splitlines() if line.strip()],
+                    "source_ref": str(row.get("source_ref") or "").strip(),
+                }
+                save_items.append({
+                    "req_key": row.get("req_key", ""),
+                    "title": row.get("title", ""),
+                    "description": row.get("description", ""),
+                    "source": row.get("source", ""),
+                    "metadata_json": json.dumps(metadata, ensure_ascii=False),
+                })
+            count = save_requirements(pid, save_items)
+            st.success(f"Đã lưu {count} yêu cầu cùng metadata nghiệp vụ.")
             st.rerun()
         with st.expander("Xem trước nội dung văn bản đã trích xuất"):
             st.text(st.session_state.get("srs_raw", "")[:20000])
