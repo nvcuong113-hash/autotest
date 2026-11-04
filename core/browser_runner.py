@@ -71,7 +71,7 @@ def _evaluate_with_navigation_retry(page: Any, script: str, attempts: int = 6) -
 
 
 def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[str, Any]:
-    """Read-only inspection that follows application redirects and retries transient navigation."""
+    """Read-only page inspection with SPA/authentication polling and network diagnostics."""
     if not base_url.strip():
         raise ValueError("Cần cấu hình Base URL trước khi kiểm tra.")
     url = _resolve_url(target_url.strip() or base_url.strip(), base_url.strip())
@@ -82,6 +82,10 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     screenshot_path = str(ARTIFACT_DIR / f"page-inspection-{time.time_ns()}.png")
     document_responses: list[dict[str, Any]] = []
+    api_responses: list[dict[str, Any]] = []
+    failed_requests: list[dict[str, Any]] = []
+    console_errors: list[str] = []
+    page_errors: list[str] = []
     navigation_errors: list[str] = []
     from playwright.sync_api import sync_playwright
 
@@ -118,9 +122,14 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[
             method:(el.getAttribute('method') || 'get').toUpperCase(), action:el.action || '', id:el.id || '', name:el.getAttribute('name') || ''}));
         const links = Array.from(document.querySelectorAll('a[href]')).slice(0,100).map((el, i) => ({
             index:i, text:clean(el.innerText || el.textContent).slice(0,120), href:el.href}));
-        return {title:document.title || '', final_url:location.href, headings, forms, inputs, buttons, links,
+        return {title:document.title || '', final_url:location.href, ready_state:document.readyState,
+            headings, forms, inputs, buttons, links,
             body_text_preview:clean(document.body ? document.body.innerText : '').slice(0,2500)};
     }'''
+
+    def safe_url(raw_url: str) -> str:
+        parsed_url = urlparse(raw_url)
+        return parsed_url._replace(query="", fragment="").geturl()
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=headless)
@@ -128,30 +137,79 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[
             context = browser.new_context(viewport={"width":1440,"height":1000})
             page = context.new_page()
             page.set_default_timeout(8000)
+
             def on_response(response: Any) -> None:
                 try:
-                    if response.request.resource_type == "document":
-                        document_responses.append({"url":response.url,"status":response.status})
+                    request = response.request
+                    entry = {"url":safe_url(response.url), "status":response.status,
+                             "resource_type":request.resource_type, "method":request.method}
+                    if request.resource_type == "document":
+                        document_responses.append(entry)
+                    elif request.resource_type in {"xhr", "fetch"}:
+                        api_responses.append(entry)
                 except Exception:
                     pass
+
+            def on_request_failed(request: Any) -> None:
+                try:
+                    failed_requests.append({"url":safe_url(request.url), "method":request.method,
+                                            "resource_type":request.resource_type,
+                                            "failure":str(request.failure or "Unknown failure")[:300]})
+                except Exception:
+                    pass
+
+            def on_console(message: Any) -> None:
+                try:
+                    if message.type == "error":
+                        console_errors.append(str(message.text)[:500])
+                except Exception:
+                    pass
+
+            def on_page_error(error: Any) -> None:
+                page_errors.append(str(error)[:500])
+
             page.on("response", on_response)
+            page.on("requestfailed", on_request_failed)
+            page.on("console", on_console)
+            page.on("pageerror", on_page_error)
+
             try:
                 page.goto(url, wait_until="commit", timeout=25000)
             except Exception as exc:
                 navigation_errors.append(f"Điều hướng ban đầu: {type(exc).__name__}: {exc}")
-            try:
-                page.wait_for_load_state("domcontentloaded", timeout=12000)
-            except Exception as exc:
-                navigation_errors.append(f"Chờ DOMContentLoaded: {type(exc).__name__}: {exc}")
-            try:
-                page.wait_for_timeout(1200)
-            except Exception:
-                pass
-            snapshot = {"title":"", "final_url":page.url, "headings":[], "forms":[], "inputs":[], "buttons":[], "links":[], "body_text_preview":""}
-            try:
-                snapshot = _evaluate_with_navigation_retry(page, snapshot_script)
-            except Exception as exc:
-                navigation_errors.append(f"Đọc DOM: {type(exc).__name__}: {exc}")
+
+            # Do not wait for networkidle or DOMContentLoaded: enterprise SPAs and
+            # authentication polling can keep navigation events pending indefinitely.
+            snapshot: dict[str, Any] = {"title":"", "final_url":page.url, "ready_state":"unknown",
+                "headings":[], "forms":[], "inputs":[], "buttons":[], "links":[], "body_text_preview":""}
+            deadline = time.monotonic() + 22
+            last_body = ""
+            stable_count = 0
+            while time.monotonic() < deadline:
+                try:
+                    current = _evaluate_with_navigation_retry(page, snapshot_script, attempts=3)
+                    snapshot = current
+                    body = str(current.get("body_text_preview", ""))
+                    pending_auth = "checking authentication" in body.lower() or "đang kiểm tra xác thực" in body.lower()
+                    if body and body == last_body and not pending_auth:
+                        stable_count += 1
+                    else:
+                        stable_count = 0
+                    last_body = body
+                    if body and not pending_auth and stable_count >= 2:
+                        break
+                except Exception as exc:
+                    navigation_errors.append(f"Đọc DOM trong khi trang tải: {type(exc).__name__}: {exc}")
+                try:
+                    page.wait_for_timeout(600)
+                except Exception:
+                    break
+
+            final_body = str(snapshot.get("body_text_preview", ""))
+            authentication_pending = (
+                "checking authentication" in final_body.lower()
+                or "đang kiểm tra xác thực" in final_body.lower()
+            )
             screenshot_saved = False
             for attempt in range(3):
                 try:
@@ -163,24 +221,33 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[
                     if page.is_closed():
                         break
                     try:
-                        page.wait_for_load_state("domcontentloaded", timeout=3000)
-                    except Exception:
-                        pass
-                    try:
                         page.wait_for_timeout(500)
                     except Exception:
                         pass
             if not screenshot_saved:
                 screenshot_path = ""
+
             return {
-                "requested_url":url, "final_url":snapshot.get("final_url") or (page.url if not page.is_closed() else ""),
+                "requested_url":url,
+                "final_url":snapshot.get("final_url") or (page.url if not page.is_closed() else ""),
                 "http_status":document_responses[-1]["status"] if document_responses else None,
-                "title":snapshot.get("title", ""), "headings":snapshot.get("headings", []),
-                "forms":snapshot.get("forms", []), "inputs":snapshot.get("inputs", []),
-                "buttons":snapshot.get("buttons", []), "links":snapshot.get("links", []),
-                "body_text_preview":snapshot.get("body_text_preview", ""),
-                "document_responses":document_responses, "navigation_errors":navigation_errors,
-                "screenshot_path":screenshot_path, "read_only":True,
+                "title":snapshot.get("title", ""),
+                "ready_state":snapshot.get("ready_state", "unknown"),
+                "authentication_pending":authentication_pending,
+                "headings":snapshot.get("headings", []),
+                "forms":snapshot.get("forms", []),
+                "inputs":snapshot.get("inputs", []),
+                "buttons":snapshot.get("buttons", []),
+                "links":snapshot.get("links", []),
+                "body_text_preview":final_body,
+                "document_responses":document_responses[-20:],
+                "api_responses":api_responses[-80:],
+                "failed_requests":failed_requests[-40:],
+                "console_errors":console_errors[-30:],
+                "page_errors":page_errors[-20:],
+                "navigation_errors":navigation_errors[-20:],
+                "screenshot_path":screenshot_path,
+                "read_only":True,
             }
         finally:
             browser.close()
