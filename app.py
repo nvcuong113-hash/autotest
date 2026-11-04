@@ -265,6 +265,24 @@ with tab_run:
             status_col.write("**Mã phản hồi HTTP:** " + str(inspection.get("http_status") or "Không có phản hồi"))
             title_col.write("**Tiêu đề trang:** " + str(inspection.get("title") or "(trống)"))
             st.caption("URL cuối cùng: " + inspection.get("final_url", ""))
+            if inspection.get("authentication_pending"):
+                st.warning("OAP Meta vẫn ở trạng thái “Checking authentication...”. Trình duyệt kiểm thử chưa có phiên đăng nhập OAP Meta; cần hoàn tất bước xác thực trước khi đọc màn hình nghiệp vụ. Inspector hiện chỉ thu thập chẩn đoán, chưa tự đăng nhập.")
+            st.caption("Trạng thái tài liệu: " + str(inspection.get("ready_state", "unknown")))
+            api_rows = inspection.get("api_responses", [])
+            if api_rows:
+                with st.expander("Các request API/XHR của OAP Meta", expanded=True):
+                    api_view = pd.DataFrame(api_rows).rename(columns={"url":"Địa chỉ API","status":"HTTP","resource_type":"Loại","method":"Phương thức"})
+                    st.dataframe(api_view, use_container_width=True, hide_index=True)
+            failed_rows = inspection.get("failed_requests", [])
+            if failed_rows:
+                with st.expander("Các request không tải được", expanded=True):
+                    failed_view = pd.DataFrame(failed_rows).rename(columns={"url":"Địa chỉ","method":"Phương thức","resource_type":"Loại","failure":"Nguyên nhân"})
+                    st.dataframe(failed_view, use_container_width=True, hide_index=True)
+            js_errors = inspection.get("console_errors", []) + inspection.get("page_errors", [])
+            if js_errors:
+                with st.expander("Lỗi JavaScript trên trang", expanded=False):
+                    for item in js_errors:
+                        st.code(item)
             if inspection.get("navigation_errors"):
                 with st.expander("Chi tiết điều hướng cần lưu ý", expanded=False):
                     for item in inspection["navigation_errors"]:
