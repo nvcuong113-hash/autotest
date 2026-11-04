@@ -14,6 +14,6 @@ RUN pip install --no-cache-dir -r requirements.txt && playwright install chromiu
 COPY . .
 RUN mkdir -p /app/data /app/artifacts
 
-EXPOSE 8501
-HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health')"
-CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+# Render injects PORT at runtime. Streamlit must bind to 0.0.0.0 on that port.
+EXPOSE 10000
+CMD ["sh", "-c", "streamlit run app.py --server.address=0.0.0.0 --server.port=${PORT:-10000} --server.headless=true"]
