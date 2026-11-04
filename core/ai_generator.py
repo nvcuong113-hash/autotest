@@ -130,16 +130,20 @@ def extract_requirements_with_ai(text: str, source: str = "") -> list[dict[str, 
             if normalized in seen:
                 continue
             seen.add(normalized)
-            extracted.append({
-                "req_key": req_key,
-                "title": title,
-                "description": description,
-                "source": source,
+            metadata = {
                 "actor": str(item.get("actor") or "").strip(),
                 "preconditions": item.get("preconditions") if isinstance(item.get("preconditions"), list) else [],
                 "business_rules": item.get("business_rules") if isinstance(item.get("business_rules"), list) else [],
                 "acceptance_criteria": item.get("acceptance_criteria") if isinstance(item.get("acceptance_criteria"), list) else [],
                 "source_ref": str(item.get("source_ref") or "").strip(),
+                "extraction_method": "gemini",
+            }
+            extracted.append({
+                "req_key": req_key,
+                "title": title,
+                "description": description,
+                "source": source,
+                "metadata_json": json.dumps(metadata, ensure_ascii=False),
             })
     return extracted
 
@@ -149,8 +153,20 @@ def generate_cases_with_ai(requirements: list[dict[str, Any]]) -> list[dict[str,
     if not requirements:
         return []
     provider = get_ai_provider()
+    enriched_requirements: list[dict[str, Any]] = []
+    for requirement in requirements:
+        enriched = dict(requirement)
+        metadata_raw = enriched.get("metadata_json")
+        if isinstance(metadata_raw, str) and metadata_raw.strip():
+            try:
+                metadata = json.loads(metadata_raw)
+                if isinstance(metadata, dict):
+                    enriched.update(metadata)
+            except json.JSONDecodeError:
+                pass
+        enriched_requirements.append(enriched)
     # Small batches reduce free-tier quota spikes and keep each answer reviewable.
-    batches = [requirements[i:i + 5] for i in range(0, len(requirements), 5)]
+    batches = [enriched_requirements[i:i + 5] for i in range(0, len(enriched_requirements), 5)]
     generated: list[dict[str, Any]] = []
     for batch_index, batch in enumerate(batches, start=1):
         prompt = {
