@@ -711,3 +711,17 @@ def test_oap_meta_profile_requires_workspace_initialization_after_auth():
     assert readiness["path_contains"] == "/api/v1/auth/set-workspace"
     assert readiness["method"] == "POST"
     assert readiness["status"] == 200
+
+
+def test_offline_case_generation_uses_stable_case_ids():
+    from core.test_generator import generate_cases
+
+    requirements = [{
+        "req_key": "REQ-001",
+        "title": "Create guarantee",
+        "description": "User can create a guarantee draft",
+    }]
+    first = generate_cases(requirements)
+    second = generate_cases(requirements)
+    assert [case["case_key"] for case in first] == [case["case_key"] for case in second]
+    assert len({case["case_key"] for case in first}) == len(first)
