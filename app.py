@@ -40,11 +40,24 @@ _boot_message.empty()
 
 st.markdown("""<style>
 .block-container{padding-top:1.5rem;max-width:1500px}
-.hero{padding:1.2rem 1.4rem;border:1px solid rgba(128,128,128,.25);border-radius:14px;margin-bottom:1rem}
-.muted{color:#818891;font-size:.9rem}
-.metric-card{border:1px solid rgba(128,128,128,.25);border-radius:12px;padding:14px 16px;min-height:92px;background:var(--secondary-background-color)}
-.metric-label{color:#707780;font-size:.83rem;margin-bottom:8px}
-.metric-value{font-size:1.8rem;font-weight:700;line-height:1.1;color:var(--text-color)}
+.stApp,.stApp p,.stApp label,.stApp [data-testid="stMarkdownContainer"]{color:#17231f}
+.stApp p,.stApp label,.stApp [data-testid="stCaptionContainer"]{font-weight:600}
+h1,h2,h3,h4{color:#10251d !important;font-weight:850 !important;letter-spacing:-.25px}
+.stCaption,[data-testid="stCaptionContainer"]{color:#46564f !important;font-weight:600 !important}
+.hero{padding:1.35rem 1.5rem;border:1px solid #cbd8d1;border-bottom:4px solid #c6d5cc;border-radius:14px;margin-bottom:1rem;background:linear-gradient(180deg,#ffffff 0%,#f6faf7 100%);box-shadow:0 4px 12px rgba(20,50,35,.07)}
+.muted{color:#43544b;font-size:.94rem;font-weight:650}
+.metric-card{border:1px solid #c7d5cc;border-bottom:4px solid #9db4a5;border-radius:12px;padding:14px 16px;min-height:92px;background:linear-gradient(180deg,#ffffff 0%,#f1f7f3 100%);box-shadow:0 3px 0 rgba(20,70,45,.08),0 7px 15px rgba(20,55,35,.07)}
+.metric-label{color:#34463d;font-size:.88rem;font-weight:750;margin-bottom:8px}
+.metric-value{font-size:1.9rem;font-weight:850;line-height:1.1;color:#103d2c}
+.stButton>button,.stDownloadButton>button{font-weight:800 !important;letter-spacing:.1px;border-radius:9px !important;transition:transform .12s ease,box-shadow .12s ease,filter .12s ease !important}
+.stButton>button[kind="primary"],.stDownloadButton>button[kind="primary"]{color:#fff !important;background:linear-gradient(180deg,#15966b 0%,#08714e 100%) !important;border:1px solid #075b3f !important;border-bottom:4px solid #06452f !important;box-shadow:0 3px 0 rgba(4,65,43,.2),0 7px 14px rgba(8,95,65,.18) !important}
+.stButton>button[kind="primary"]:hover,.stDownloadButton>button[kind="primary"]:hover{filter:brightness(1.06);transform:translateY(-1px);box-shadow:0 4px 0 rgba(4,65,43,.22),0 10px 18px rgba(8,95,65,.22) !important}
+.stButton>button[kind="primary"]:active,.stDownloadButton>button[kind="primary"]:active{transform:translateY(2px);border-bottom-width:2px !important;box-shadow:0 1px 0 rgba(4,65,43,.2) !important}
+.stButton>button:not([kind="primary"]),.stDownloadButton>button:not([kind="primary"]){color:#17382b !important;background:linear-gradient(180deg,#ffffff 0%,#edf4ef 100%) !important;border:1px solid #9eb6a6 !important;border-bottom:3px solid #829c8a !important;box-shadow:0 2px 0 rgba(35,70,48,.08),0 5px 10px rgba(35,70,48,.07) !important;font-weight:750 !important}
+.stButton>button:not([kind="primary"]):hover,.stDownloadButton>button:not([kind="primary"]):hover{background:#e5f1e9 !important;transform:translateY(-1px)}
+.stButton>button:focus-visible,.stDownloadButton>button:focus-visible{outline:3px solid #f0b429 !important;outline-offset:2px}
+[data-testid="stTabs"] button{font-weight:750 !important;color:#263b31 !important}
+[data-testid="stDataFrame"]{border:1px solid #bdccc2;border-radius:9px}
 </style>""", unsafe_allow_html=True)
 
 with st.sidebar:
@@ -237,7 +250,7 @@ with tab_run:
         st.caption("Địa chỉ hệ thống ở thanh bên phải cùng tên miền. Công cụ chỉ mở trang và đọc DOM; không bấm nút, không gửi biểu mẫu.")
         if st.button("Kiểm tra màn hình và thu thập selector", key=f"inspect_btn_{pid}", type="primary"):
             if not base_url.strip():
-                st.error("Enter the site's origin in Base URL in the sidebar, e.g. https://oap-meta-staging.ovigroup.vn")
+                st.error("Nhập địa chỉ gốc của hệ thống ở thanh bên, ví dụ https://oap-meta-staging.ovigroup.vn")
             elif not inspect_url.strip():
                 st.error("Nhập đầy đủ URL màn hình Staging cần kiểm tra.")
             else:
@@ -252,6 +265,13 @@ with tab_run:
             status_col.write("**Mã phản hồi HTTP:** " + str(inspection.get("http_status") or "Không có phản hồi"))
             title_col.write("**Tiêu đề trang:** " + str(inspection.get("title") or "(trống)"))
             st.caption("URL cuối cùng: " + inspection.get("final_url", ""))
+            if inspection.get("navigation_errors"):
+                with st.expander("Chi tiết điều hướng cần lưu ý", expanded=False):
+                    for item in inspection["navigation_errors"]:
+                        st.caption(item)
+            if inspection.get("body_text_preview"):
+                with st.expander("Nội dung văn bản đầu trang", expanded=False):
+                    st.text(inspection["body_text_preview"])
             st.write("**Tiêu đề trên màn hình**")
             st.dataframe(pd.DataFrame(inspection.get("headings", [])).rename(columns={"level":"Cấp tiêu đề","text":"Nội dung"}), use_container_width=True, hide_index=True)
             st.write("**Trường nhập liệu và selector đề xuất**")
