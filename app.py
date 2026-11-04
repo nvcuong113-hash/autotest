@@ -113,7 +113,7 @@ with st.sidebar:
         format_func=lambda value: next(
             (item["name"] for item in profile_options if item["profile_id"] == value), value
         ),
-        key="application_profile_id",
+        key=f"application_profile_id_{pid}",
     )
     application_profile = load_application_profile(application_profile_id)
     mapping_summary = get_profile_mapping_summary(application_profile)
