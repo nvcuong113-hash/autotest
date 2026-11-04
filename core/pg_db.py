@@ -225,6 +225,8 @@ def update_test_case(case_id: int, fields: dict[str, Any], db_path: str | None =
         "expected_result", "source_ref", "enabled",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
+    if "enabled" in updates:
+        updates["enabled"] = int(bool(updates["enabled"]))
     if not updates:
         return
     columns = [f"{key}=%s" for key in updates]
@@ -304,3 +306,17 @@ def list_results(project_id: int, db_path: str | None = None) -> list[dict[str, 
             """,
             (project_id,),
         ).fetchall())
+
+
+
+def mark_interrupted_runs() -> int:
+    """Mark test runs left RUNNING after a Browser Runner process restart."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE test_runs
+            SET status='INTERRUPTED', finished_at=CURRENT_TIMESTAMP
+            WHERE status='RUNNING' AND finished_at IS NULL
+            """
+        )
+        return int(cursor.rowcount)
