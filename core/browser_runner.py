@@ -104,8 +104,12 @@ def _classify_auth_state(final_url: str, api_responses: list[dict[str, Any]], bo
         "/auth/me" in str(item.get("url", "")).lower()
         or "/api/v1/auth/" in str(item.get("url", "")).lower()
     )]
-    auth_api_401 = any(int(item.get("status", 0)) == 401 for item in auth_events)
-    auth_api_success = any(int(item.get("status", 0)) == 200 for item in auth_events)
+    def status_code(item: dict[str, Any]) -> int:
+        raw = str(item.get("status", "")).strip()
+        match = re.search(r"\\b(\\d{3})\\b", raw)
+        return int(match.group(1)) if match else 0
+    auth_api_401 = any(status_code(item) == 401 for item in auth_events)
+    auth_api_success = any(status_code(item) == 200 for item in auth_events)
     body_lower = body_text.lower()
     pending = "checking authentication" in body_lower or "đang kiểm tra xác thực" in body_lower
     mfa_required = any(token in body_lower for token in ("mã xác thực", "verification code", "one-time password", "two-factor", "2fa", "otp"))
@@ -133,6 +137,36 @@ def _classify_auth_state(final_url: str, api_responses: list[dict[str, Any]], bo
         "authenticated": authenticated,
         "mfa_required": mfa_required,
     }
+
+
+def _navigate_to_login_page(page: Any, base_url: str, timeout_seconds: int = 12) -> dict[str, Any]:
+    """Open the first-party OAP Meta login route before locating credentials fields."""
+    login_url = urljoin(base_url.rstrip("/") + "/", "login")
+    current_path = urlparse(page.url).path.rstrip("/").lower()
+    navigated = False
+    if current_path not in {"/login", "/signin", "/sign-in"}:
+        try:
+            page.goto(login_url, wait_until="commit", timeout=20000)
+            navigated = True
+        except Exception as exc:
+            return {"navigated": navigated, "result": "LOGIN_ROUTE_NAVIGATION_FAILED",
+                    "error_type": type(exc).__name__}
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            password_count = page.locator('input[type="password"]').count()
+            username_count = page.locator(
+                'input[type="email"], input[autocomplete="username"], input[type="text"]'
+            ).count()
+            if password_count > 0 and username_count > 0:
+                return {"navigated": navigated, "result": "LOGIN_PAGE_READY"}
+        except Exception:
+            pass
+        try:
+            page.wait_for_timeout(400)
+        except Exception:
+            break
+    return {"navigated": navigated, "result": "LOGIN_FORM_NOT_READY"}
 
 
 def _submit_username_password_login(page: Any, username: str, password: str) -> dict[str, Any]:
@@ -328,7 +362,15 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             auth_state = _classify_auth_state(final_url, api_responses, final_body)
             login_diagnostic = {"attempted": False, "result": "NOT_REQUESTED"}
             if authenticate and auth_state["authentication_required"]:
-                login_diagnostic = _submit_username_password_login(page, username, password)
+                login_route = _navigate_to_login_page(page, base_url)
+                login_diagnostic = {
+                    "attempted": False,
+                    "result": login_route["result"],
+                    "login_page_navigated": login_route.get("navigated", False),
+                }
+                if login_route["result"] == "LOGIN_PAGE_READY":
+                    login_diagnostic = _submit_username_password_login(page, username, password)
+                    login_diagnostic["login_page_navigated"] = login_route.get("navigated", False)
                 if login_diagnostic["result"] == "SUBMITTED":
                     auth_deadline = time.monotonic() + 18
                     while time.monotonic() < auth_deadline:
