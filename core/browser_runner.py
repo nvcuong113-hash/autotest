@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from core.action_registry import SEMANTIC_ACTIONS, TargetNotMappedError, execute_semantic_step
+from core.authentication import AuthenticationError, ensure_authenticated
 from core.db import create_run, finish_run, save_result
 from core.test_generator import validate_steps_json
 
@@ -840,14 +841,26 @@ def run_suite(project_id: int, base_url: str, cases: list[dict[str, Any]],
                 service_workers="block",
                 reduced_motion="reduce",
             )
+            authentication_error = ""
+            authentication_info: dict[str, Any] = {"authenticated": False, "status": "NOT_CHECKED"}
+            if application_profile:
+                try:
+                    authentication_info = ensure_authenticated(
+                        context, application_profile, base_url.strip(),
+                        username=username, password=password,
+                    )
+                except AuthenticationError as exc:
+                    authentication_error = str(exc)
             try:
-                # One context per run: cookies/local storage can be reused by subsequent
-                # cases in the same suite. Each case still receives an isolated page.
+                # One context per run: cookies/local storage are reused by subsequent
+                # cases in the same suite. Each case receives an isolated page.
                 for case in cases:
                     started = time.perf_counter()
                     page = None
                     screenshot_path = ""
                     try:
+                        if authentication_error:
+                            raise ManualStepRequired(authentication_error)
                         page = context.new_page()
                         page.set_default_timeout(7000)
                         status, message, screenshot_path = execute_case(
@@ -882,4 +895,4 @@ def run_suite(project_id: int, base_url: str, cases: list[dict[str, Any]],
         results.append({"case_key": "-", "title": "Runner setup", "status": "BLOCKED",
                         "message": f"{type(exc).__name__}: {exc}", "screenshot_path": "", "duration_seconds": 0})
     finish_run(run_id, overall)
-    return {"run_id": run_id, "status": overall, "results": results}
+    return {"run_id": run_id, "status": overall, "authentication": locals().get("authentication_info", {}), "results": results}
