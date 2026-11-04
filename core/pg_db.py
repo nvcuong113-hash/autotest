@@ -246,7 +246,7 @@ def update_test_case(case_id: int, fields: dict[str, Any], db_path: str | None =
         raise ValueError("Không dùng db_path khi cấu hình PostgreSQL.")
     allowed = {
         "title", "test_type", "priority", "preconditions", "steps_json",
-        "expected_result", "source_ref", "enabled",
+        "expected_result", "source_ref", "automation_level", "enabled",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
     if "enabled" in updates:
