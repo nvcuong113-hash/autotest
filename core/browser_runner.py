@@ -445,6 +445,7 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             }
         finally:
             browser.close()
+            gc.collect()
 
 def execute_case(case: dict[str, Any], page: Any, base_url: str,
                  username: str = "", password: str = "") -> tuple[str, str, str]:
@@ -515,7 +516,7 @@ def run_suite(project_id: int, base_url: str, cases: list[dict[str, Any]],
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=headless)
+            browser = _launch_low_memory_browser(pw, True)
             try:
                 for case in cases:
                     started = time.perf_counter()
@@ -547,6 +548,7 @@ def run_suite(project_id: int, base_url: str, cases: list[dict[str, Any]],
                                     "duration_seconds": round(duration, 2)})
             finally:
                 browser.close()
+                gc.collect()
     except Exception as exc:
         overall = "ERROR"
         results.append({"case_key": "-", "title": "Runner setup", "status": "BLOCKED",
