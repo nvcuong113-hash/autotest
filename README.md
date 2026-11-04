@@ -2,6 +2,41 @@
 
 AutoTest converts SRS documents into traceable requirements and editable test cases, then executes browser steps with Playwright.
 
+
+## Architecture: SRS-driven reusable test engine
+
+AutoTest separates business test design from application-specific browser locators.
+
+1. **SRS Intelligence** – parses PDF, DOCX, XLSX, CSV, Markdown and text; Gemini can extract explicit requirements, actors, preconditions, business rules, acceptance criteria and source references. Local parsing remains available without an AI key.
+2. **Test Design** – generates requirement-linked scenarios and semantic test steps. AI output is a draft and must be reviewed.
+3. **Application Profile** – JSON profile per application, containing base URL, authentication strategy, session probe, page routes, shared components and verified semantic targets.
+4. **Action Registry / Execution Engine** – resolves business targets such as `guarantee.create_button` through the selected profile. The Test Case itself does not contain CSS/XPath selectors.
+5. **Evidence & Reporting** – stores test runs, result statuses, source references and automation level.
+
+### Add another application
+
+Create a JSON file under `application_profiles/<profile-id>.json` following `application_profiles/oap-meta.json`.
+
+- Define the application's authentication strategy and session probe.
+- Define internal page IDs and routes.
+- Add shared/page targets only after they are verified from the application.
+- Mark a target `"verified": true` only when the locator has been checked against the target environment.
+- Do not copy OAP Meta selectors into another application profile.
+
+The same SRS parser, semantic test model, action registry, execution engine and reporting functions are reused by every profile.
+
+### Test Case automation levels
+
+- `automatable`: all required steps and assertions are available through verified mappings.
+- `partially_automatable`: some steps can run but at least one action/target needs review.
+- `manual`: the case is not executed by Playwright.
+- A case without an assertion is blocked from execution; navigation or data entry alone must never produce a false PASS.
+
+### Gemini AI provider
+
+The default AI provider is Google Gemini, configured with `AI_PROVIDER=gemini`, `GEMINI_MODEL=gemini-3.5-flash-lite`, and `GEMINI_API_KEY` on the UI service. No OpenAI key or OpenAI SDK is required. The free tier has quotas and rate limits; quota errors are shown instead of silently switching providers or fabricating results.
+
+
 ## MVP features
 
 - Parse PDF, DOCX, XLSX, CSV, Markdown, TXT, YAML and JSON.
