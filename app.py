@@ -135,7 +135,7 @@ with tab_cases:
     st.subheader("Tạo Test Case")
     with st.expander("Nạp bộ kiểm thử mẫu: CCM — Quản lý Bảo lãnh ngân hàng", expanded=False):
         suite_meta = load_guarantee_suite()
-        st.write("Nguồn đặc tả: **" + suite_meta["source_version"] + "** · 
+        st.write("Nguồn đặc tả: **" + suite_meta["source_version"] + "** · "
                  + str(len(suite_meta["requirements"])) + " nhóm yêu cầu · "
                  + str(len(suite_meta["test_cases"])) + " Test Case")
         st.caption("Các Test Case được biên soạn theo BRD. Bước thao tác đang để thủ công cho đến khi xác minh giao diện và selector.")
