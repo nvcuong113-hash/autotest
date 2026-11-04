@@ -28,20 +28,23 @@
       "by": "css",
       "value": "input[name='usernameOrEmail']",
       "verified": true,
-      "evidence": "Browser Inspector observed name=usernameOrEmail on OAP Meta login form."
+      "evidence": "Browser Inspector observed name=usernameOrEmail on OAP Meta login form.",
+      "purpose": "authentication"
     },
     "auth.password": {
       "by": "css",
       "value": "input[name='password']",
       "verified": true,
-      "evidence": "Browser Inspector observed name=password on OAP Meta login form."
+      "evidence": "Browser Inspector observed name=password on OAP Meta login form.",
+      "purpose": "authentication"
     },
     "auth.submit": {
       "by": "role",
       "value": "button",
       "name": "Login",
       "verified": true,
-      "evidence": "Browser Inspector observed a Login button on OAP Meta login form."
+      "evidence": "Browser Inspector observed a Login button on OAP Meta login form.",
+      "purpose": "authentication"
     }
   },
   "pages": {
