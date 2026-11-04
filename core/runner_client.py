@@ -57,6 +57,7 @@ def inspect_page(
     username: str = "",
     password: str = "",
     authenticate: bool = False,
+    application_profile_id: str = "oap-meta",
 ) -> dict[str, Any]:
     result = _runner_request(
         "/inspect",
@@ -67,6 +68,7 @@ def inspect_page(
             "username": username,
             "password": password,
             "authenticate": bool(authenticate),
+            "application_profile_id": application_profile_id,
         },
         timeout=240,
     )
