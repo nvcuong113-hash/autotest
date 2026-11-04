@@ -171,3 +171,50 @@ def test_classify_auth_state_pending_without_login_redirect():
     assert pending["authentication_required"] is False
     assert pending["authentication_pending"] is True
     assert pending["authentication_state"] == "AUTH_PENDING"
+
+
+def test_low_memory_chromium_profile_limits_renderer_processes():
+    from core.browser_runner import CHROMIUM_ARGS, _launch_low_memory_browser
+
+    class FakeChromium:
+        def __init__(self):
+            self.kwargs = None
+
+        def launch(self, **kwargs):
+            self.kwargs = kwargs
+            return "browser"
+
+    class FakePlaywright:
+        def __init__(self):
+            self.chromium = FakeChromium()
+
+    playwright = FakePlaywright()
+    assert _launch_low_memory_browser(playwright, True) == "browser"
+    assert playwright.chromium.kwargs["headless"] is True
+    assert "--renderer-process-limit=1" in CHROMIUM_ARGS
+    assert "--disable-dev-shm-usage" in CHROMIUM_ARGS
+    assert "--no-zygote" in CHROMIUM_ARGS
+
+
+def test_runner_client_fails_closed_when_remote_runner_is_not_configured(monkeypatch):
+    from core.runner_client import inspect_page
+
+    monkeypatch.delenv("RUNNER_URL", raising=False)
+    monkeypatch.delenv("RUNNER_API_TOKEN", raising=False)
+    try:
+        inspect_page("https://example.test", "https://example.test")
+    except RuntimeError as exc:
+        assert "RUNNER_URL" in str(exc)
+    else:
+        raise AssertionError("Must not fall back to local Playwright on the UI instance")
+
+
+def test_runner_client_caps_browser_batch_at_five_cases():
+    from core.runner_client import run_suite
+
+    try:
+        run_suite(1, "https://example.test", [{}] * 6)
+    except ValueError as exc:
+        assert "5" in str(exc)
+    else:
+        raise AssertionError("Browser batches must be capped at five cases")

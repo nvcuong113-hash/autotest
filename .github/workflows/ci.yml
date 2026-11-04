@@ -13,6 +13,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
-      - run: python -m compileall -q app.py core tests
+      - run: pip install -r requirements.txt -r requirements-runner.txt
+      - run: python -m compileall -q app.py runner_service.py core tests
       - run: pytest -q
