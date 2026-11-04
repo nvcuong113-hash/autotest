@@ -64,7 +64,21 @@ Set these Environment Variables:
 
 The runner processes one browser job at a time and rejects batches larger than five test cases. Requests other than `/health` require the private token.
 
-## 5. Verify
+## 5. Configure Gemini AI (UI service only)
+
+AutoTest uses Google Gemini as its default AI provider. It does not require an OpenAI account, OpenAI API key, or OpenAI SDK.
+
+Set these variables on the `oap-autotest-ccm` Render service:
+
+- `AI_PROVIDER` = `gemini`
+- `GEMINI_MODEL` = `gemini-3.5-flash-lite`
+- `GEMINI_API_KEY` = API key created in Google AI Studio
+
+Do not add the Gemini key to the Browser Runner service. The UI service calls Gemini for SRS extraction and Test Case design; the Runner only executes browser workflows.
+
+The model ID is the stable Gemini API model code `gemini-3.5-flash-lite`. Gemini's free tier still has request/rate quotas. When quota is exhausted, AutoTest shows a quota message; it does not silently switch providers or fabricate AI output.
+
+## 6. Verify
 
 1. Open `https://<runner-host>.onrender.com/health`. It should return JSON with `ok: true`, `database_configured: true`, and `token_configured: true`. The endpoint also reports `peak_process_rss_mb` and `browser_job_active` for runtime memory diagnostics.
 2. Confirm the UI service Environment Variables are saved and redeploy both services.
