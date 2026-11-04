@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
-import uuid
 from typing import Any
 
 from core.ai_provider import get_ai_provider
@@ -190,7 +190,9 @@ def generate_cases_with_ai(
             },
             "verified_shared_targets": sorted(
                 target_id for target_id, definition in ((application_profile or {}).get("shared_targets") or {}).items()
-                if isinstance(definition, dict) and definition.get("verified") is True
+                if isinstance(definition, dict)
+                and definition.get("verified") is True
+                and definition.get("purpose") != "authentication"
             ),
         }
         prompt = {
@@ -250,7 +252,11 @@ def generate_cases_with_ai(
                     if target_id:
                         page_targets = (pages.get(page_id) or {}).get("targets") or {}
                         definition = page_targets.get(target_id) or shared.get(target_id)
-                        if not isinstance(definition, dict) or definition.get("verified") is not True:
+                        if (
+                            not isinstance(definition, dict)
+                            or definition.get("verified") is not True
+                            or definition.get("purpose") == "authentication"
+                        ):
                             step.update({
                                 "action": "manual",
                                 "description": f"Target '{target_id}' chưa được xác minh trong Application Profile.",
@@ -271,7 +277,14 @@ def generate_cases_with_ai(
                 })
                 automation_level = "manual"
             generated.append({
-                "case_key": f"AI-{uuid.uuid4().hex[:10].upper()}",
+                "case_key": "AI-" + hashlib.sha256(
+                    "|".join([
+                        req_key,
+                        str(item.get("title") or ""),
+                        str(item.get("test_type") or "Functional"),
+                        str(item.get("source_ref") or ""),
+                    ]).encode("utf-8")
+                ).hexdigest()[:10].upper(),
                 "req_key": req_key,
                 "title": str(item.get("title") or "Test Case cần rà soát"),
                 "test_type": str(item.get("test_type") or "Functional"),
