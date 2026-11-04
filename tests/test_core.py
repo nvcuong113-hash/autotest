@@ -6,7 +6,7 @@ from core.test_generator import generate_cases, validate_steps_json
 
 
 def test_extract_explicit_requirement_ids():
-    text = "FR-001 The system must allow sign in using a registered email.\\nNFR-002 The system shall respond within three seconds."
+    text = "FR-001 The system must allow sign in using a registered email.\nNFR-002 The system shall respond within three seconds."
     found = extract_requirements(text, "sample.txt")
     assert len(found) == 2
     assert found[0]["req_key"] == "FR-001"
