@@ -226,7 +226,7 @@ def test_classify_auth_state_detects_auth_me_401_even_with_url_query():
 
     result = _classify_auth_state(
         "https://oap-meta-staging.ovigroup.vn/app/OVI_SUITE/ccm/TRM_GUARANTEE_LIST",
-        [{"url":"https://oap-meta-staging.ovigroup.vn/api/v1/auth/me?ts=123","status":"401"}],
+        [{"url":"https://oap-meta-staging.ovigroup.vn/api/v1/auth/me?ts=123","status":"HTTP 401 Unauthorized"}],
         "Checking authentication...",
     )
     assert result["authentication_required"] is True
