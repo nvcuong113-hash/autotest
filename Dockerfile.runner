@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements-runner.txt .
-RUN pip install --no-cache-dir -r requirements-runner.txt && playwright install chromium
+RUN pip install --no-cache-dir -r requirements-runner.txt && playwright install chromium --only-shell
 COPY . .
 RUN mkdir -p /app/data /app/artifacts
 
