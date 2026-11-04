@@ -750,6 +750,7 @@ def test_postgres_init_db_serializes_schema_migrations(monkeypatch):
     assert statements[0][0] == "SELECT pg_advisory_xact_lock(%s, %s)"
     assert statements[0][1] == (20261104, 1)
     assert any("ALTER TABLE test_cases" in statement for statement, _ in statements)
+    assert any("CREATE TABLE IF NOT EXISTS application_mappings" in statement for statement, _ in statements)
 
 
 def test_postgres_init_db_retries_full_transaction_after_deadlock(monkeypatch):
@@ -1056,3 +1057,63 @@ def test_runner_client_sends_project_mapping_overrides(monkeypatch):
         profile_mappings=mapping,
     )
     assert captured["payload"]["profile_mappings"][0]["target_id"] == "guarantee.search.keyword"
+
+
+def test_body_level_expect_text_is_a_valid_assertion_without_target_mapping():
+    from core.automation_assessment import assess_test_case
+
+    profile = {
+        "pages": {"guarantee.list": {"path": "/guarantees", "targets": {}}},
+        "shared_targets": {},
+    }
+    case = {
+        "case_key": "TC-BODY-TEXT",
+        "title": "Verify guarantee page title",
+        "steps_json": json.dumps([
+            {"action": "navigate", "page": "guarantee.list"},
+            {"action": "expect_text", "expected": "Danh sách bảo lãnh"},
+        ]),
+    }
+    assessment = assess_test_case(case, profile)
+    assert assessment["status"] == "READY"
+    assert assessment["recommended_level"] == "automatable"
+
+
+def test_shared_component_mapping_can_be_reused_across_pages():
+    from core.application_profile import merge_profile_mappings
+    from core.automation_assessment import assess_test_case
+
+    profile = {
+        "pages": {
+            "guarantee.list": {"path": "/guarantees", "targets": {}},
+            "guarantee.detail": {"path": "/guarantees/detail", "targets": {}},
+        },
+        "shared_targets": {},
+    }
+    profile = merge_profile_mappings(profile, [{
+        "page_id": "",
+        "target_id": "common.global_search",
+        "locator_by": "placeholder",
+        "locator_value": "Tìm kiếm",
+        "verified": True,
+        "evidence": "Shared header control verified",
+    }])
+    cases = [
+        {
+            "case_key": "TC-LIST",
+            "steps_json": json.dumps([
+                {"action": "navigate", "page": "guarantee.list"},
+                {"action": "fill", "target": "common.global_search", "value": "BG-01"},
+                {"action": "expect_text", "expected": "BG-01"},
+            ]),
+        },
+        {
+            "case_key": "TC-DETAIL",
+            "steps_json": json.dumps([
+                {"action": "navigate", "page": "guarantee.detail"},
+                {"action": "fill", "target": "common.global_search", "value": "BG-02"},
+                {"action": "expect_text", "expected": "BG-02"},
+            ]),
+        },
+    ]
+    assert [assess_test_case(case, profile)["status"] for case in cases] == ["READY", "READY"]
