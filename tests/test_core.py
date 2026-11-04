@@ -536,6 +536,7 @@ def test_gemini_test_design_uses_semantic_target_and_not_selector(monkeypatch):
                     {"action": "navigate", "page": "ccm.guarantee.list"},
                     {"action": "click", "target": "guarantee.create_button"},
                     {"action": "fill", "target": "guarantee.amount", "value": "${data.amount}"},
+                    {"action": "expect_text", "target": "guarantee.status", "expected": "DRAFT"},
                 ],
                 "expected_result": "Đề xuất được lưu ở trạng thái DRAFT.",
                 "source_ref": "Mục 3.3",
