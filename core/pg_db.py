@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from typing import Any
 
@@ -90,9 +91,33 @@ def init_db(db_path: str | None = None) -> None:
         "ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS automation_level TEXT NOT NULL DEFAULT 'manual'",
         "ALTER TABLE requirements ADD COLUMN IF NOT EXISTS metadata_json TEXT NOT NULL DEFAULT '{}'",
     ]
-    with connect() as conn:
-        for statement in statements:
-            conn.execute(statement)
+    # Streamlit can start multiple processes at the same time (deploy,
+    # cold-start, health checks and user sessions). PostgreSQL DDL takes
+    # relation locks; concurrent CREATE/ALTER statements can deadlock even
+    # when they use IF NOT EXISTS. Serialize the complete migration transaction
+    # across every app instance using one database-wide transaction advisory lock.
+    #
+    # The lock is released automatically on COMMIT/ROLLBACK when the connection
+    # context exits. Every AutoTest UI instance must use this same lock key.
+    advisory_lock_key = (20261104, 1)
+    max_attempts = 4
+
+    for attempt in range(max_attempts):
+        try:
+            with connect() as conn:
+                conn.execute(
+                    "SELECT pg_advisory_xact_lock(%s, %s)",
+                    advisory_lock_key,
+                )
+                for statement in statements:
+                    conn.execute(statement)
+            return
+        except (psycopg.errors.DeadlockDetected, psycopg.errors.SerializationFailure):
+            if attempt >= max_attempts - 1:
+                raise
+            # Retry the whole transaction, not only the failed DDL statement.
+            # PostgreSQL has already aborted the transaction after a deadlock.
+            time.sleep(0.25 * (2 ** attempt))
 
 
 def create_project(name: str, description: str = "", db_path: str | None = None) -> int:
