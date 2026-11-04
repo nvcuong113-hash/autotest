@@ -97,7 +97,16 @@ def save_requirements(project_id: int, items: list[dict[str, Any]], db_path: str
             key, title, desc = (str(item.get(k) or "").strip() for k in ("req_key", "title", "description"))
             if not key or not title or not desc:
                 continue
-            metadata = item.get("metadata")
+            metadata_raw = item.get("metadata_json")
+            if isinstance(metadata_raw, str) and metadata_raw.strip():
+                try:
+                    metadata = json.loads(metadata_raw)
+                except json.JSONDecodeError:
+                    metadata = {}
+            elif isinstance(metadata_raw, dict):
+                metadata = metadata_raw
+            else:
+                metadata = item.get("metadata")
             if not isinstance(metadata, dict):
                 metadata = {name: item.get(name) for name in (
                     "actor", "preconditions", "business_rules", "acceptance_criteria", "source_ref"
