@@ -502,34 +502,45 @@ with tab_mapping:
         "Chọn target đã được Test Case tham chiếu hoặc tạo target mới. Mapping lưu ở cấp dự án + Application Profile; "
         "chỉ đánh dấu xác minh sau khi đã kiểm tra locator trên đúng màn hình Staging."
     )
-    page_options = list((effective_profile.get("pages") or {}).keys())
-    if not page_options:
+    page_ids = list((effective_profile.get("pages") or {}).keys())
+    if not page_ids:
         st.warning("Application Profile chưa khai báo page nghiệp vụ.")
     else:
-        missing_target_refs = [
-            item for item in coverage
-            if item["mapping_status"] != "Đã xác minh" and item["target_id"]
-        ]
+        page_options = [""] + page_ids
+        target_refs = [item for item in coverage if item["target_id"]]
         target_choice_options = ["Tạo target mới"] + [
-            f"{item['page_id']} :: {item['target_id']}" for item in missing_target_refs
+            f"{item['page_id']} :: {item['target_id']}" for item in target_refs
         ]
-        target_choice = st.selectbox(
-            "Target cần mapping",
-            target_choice_options,
-            key=f"map_target_choice_{pid}",
-        )
-        suggested_page = page_options[0]
-        suggested_target = ""
-        if target_choice != "Tạo target mới":
-            page_label, suggested_target = target_choice.split(" :: ", 1)
-            suggested_page = page_label if page_label in page_options else page_options[0]
+        target_choice_key = f"map_target_choice_{pid}"
+        target_id_key = f"map_target_id_{pid}"
+        page_key = f"map_page_{pid}"
 
+        def _sync_mapping_target_choice():
+            choice = st.session_state.get(target_choice_key, "Tạo target mới")
+            if choice == "Tạo target mới":
+                st.session_state[target_id_key] = ""
+                return
+            page_label, target_value = choice.split(" :: ", 1)
+            st.session_state[target_id_key] = target_value
+            if page_label == "(Shared)":
+                st.session_state[page_key] = ""
+            elif page_label in page_ids:
+                st.session_state[page_key] = page_label
+
+        target_choice = st.selectbox(
+            "Target cần mapping / cập nhật",
+            target_choice_options,
+            key=target_choice_key,
+            on_change=_sync_mapping_target_choice,
+        )
         page_id = st.selectbox(
             "Màn hình / Page",
             page_options,
-            index=page_options.index(suggested_page),
-            format_func=lambda value: str((effective_profile.get("pages") or {}).get(value, {}).get("name") or value),
-            key=f"map_page_{pid}",
+            format_func=lambda value: (
+                "Component dùng chung (Shared)" if not value
+                else str((effective_profile.get("pages") or {}).get(value, {}).get("name") or value)
+            ),
+            key=page_key,
         )
 
         inspection = st.session_state.get(f"inspection_{pid}") or {}
@@ -543,22 +554,43 @@ with tab_mapping:
             f"{item.get('tag','element')} · {item.get('name') or item.get('id') or item.get('text') or item.get('placeholder') or 'không nhãn'} · {item.get('suggested_selector')}"
             for item in candidates
         ]
+        candidate_key = f"map_candidate_{pid}"
+        locator_value_key = f"map_locator_value_{pid}"
+        locator_name_key = f"map_locator_name_{pid}"
+
+        def _sync_inspector_candidate():
+            label = st.session_state.get(candidate_key, "Không lấy từ Inspector")
+            if label == "Không lấy từ Inspector":
+                st.session_state[locator_value_key] = ""
+                st.session_state[locator_name_key] = ""
+                return
+            candidate_index = candidate_labels.index(label) - 1
+            if 0 <= candidate_index < len(candidates):
+                candidate = candidates[candidate_index]
+                st.session_state[locator_value_key] = str(candidate.get("suggested_selector") or "")
+                st.session_state[locator_name_key] = str(candidate.get("aria_label") or candidate.get("text") or "")
+
         candidate_label = st.selectbox(
             "Phần tử gợi ý từ lần Inspector gần nhất",
             candidate_labels,
-            key=f"map_candidate_{pid}",
+            key=candidate_key,
+            on_change=_sync_inspector_candidate,
         )
         selected_candidate = (
             candidates[candidate_labels.index(candidate_label) - 1]
             if candidate_label != "Không lấy từ Inspector" else {}
         )
-        candidate_selector = str(selected_candidate.get("suggested_selector") or "")
-        default_target = suggested_target or ""
+        if target_id_key not in st.session_state:
+            st.session_state[target_id_key] = ""
+        if locator_value_key not in st.session_state:
+            st.session_state[locator_value_key] = str(selected_candidate.get("suggested_selector") or "")
+        if locator_name_key not in st.session_state:
+            st.session_state[locator_name_key] = str(selected_candidate.get("aria_label") or selected_candidate.get("text") or "")
+
         target_id = st.text_input(
             "Semantic target ID",
-            value=default_target,
             placeholder="Ví dụ: guarantee.filter.keyword",
-            key=f"map_target_id_{pid}",
+            key=target_id_key,
             help="Dùng tên nghiệp vụ ổn định. Một target có thể được tham chiếu bởi nhiều Test Case.",
         )
         strategy_options = ["css", "role", "label", "placeholder", "text"]
@@ -570,14 +602,12 @@ with tab_mapping:
         )
         locator_value = st.text_input(
             "Locator value",
-            value=candidate_selector,
             placeholder="Ví dụ: input[name='f_keyword']",
-            key=f"map_locator_value_{pid}",
+            key=locator_value_key,
         )
         locator_name = st.text_input(
             "Accessible name (chỉ dùng cho role)",
-            value=str(selected_candidate.get("aria_label") or selected_candidate.get("text") or ""),
-            key=f"map_locator_name_{pid}",
+            key=locator_name_key,
         )
         exact = st.checkbox("So khớp chính xác", value=True, key=f"map_exact_{pid}")
         evidence_default = ""
