@@ -56,7 +56,38 @@ def ensure_authenticated(
         raise AuthenticationError("Login route phải cùng origin với Base URL.")
 
     page = context.new_page()
+    workspace_events: list[dict[str, Any]] = []
+    readiness = auth.get("post_login_readiness") or {}
+    required_api = readiness.get("required_api") or {}
+    required_path = str(required_api.get("path_contains") or "")
+    required_method = str(required_api.get("method") or "POST").upper()
+    required_status = int(required_api.get("status") or 200)
+
+    def on_response(response: Any) -> None:
+        try:
+            response_path = urlparse(response.url).path
+            request_method = str(response.request.method).upper()
+            if required_path and required_path in response_path and request_method == required_method:
+                workspace_events.append({
+                    "path": response_path,
+                    "method": request_method,
+                    "status": int(response.status),
+                })
+                if len(workspace_events) > 10:
+                    del workspace_events[:-10]
+        except Exception:
+            pass
+
     try:
+        page.on("response", on_response)
+        # Authentication pages can load fonts/images that are not needed to fill
+        # credentials; apply the same low-memory rule as the inspection page.
+        page.route(
+            "**/*",
+            lambda route: route.abort()
+            if route.request.resource_type in {"image", "font", "media"}
+            else route.continue_(),
+        )
         page.goto(login_url, wait_until="domcontentloaded", timeout=20000)
         username_target = str(auth.get("username_target") or "")
         password_target = str(auth.get("password_target") or "")
@@ -69,15 +100,40 @@ def ensure_authenticated(
 
         deadline = time.monotonic() + max(5, min(timeout_seconds, 45))
         while time.monotonic() < deadline:
-            if session_is_valid():
-                return {"authenticated": True, "status": "AUTHENTICATED", "login_url": login_url}
+            session_ok = session_is_valid()
+            current_path = urlparse(page.url).path.rstrip("/").lower()
+            login_paths = {
+                str(auth.get("login_path") or "").rstrip("/").lower(),
+                "/login",
+                "/signin",
+                "/sign-in",
+            }
+            required_api_ok = (
+                not required_path
+                or any(event["status"] == required_status for event in workspace_events)
+            )
+            left_login_page = current_path not in login_paths
+            if session_ok and left_login_page and required_api_ok:
+                return {
+                    "authenticated": True,
+                    "status": "AUTHENTICATED",
+                    "login_url": login_url,
+                    "post_login_api": workspace_events[-1] if workspace_events else None,
+                }
             try:
                 page.wait_for_timeout(500)
             except Exception:
                 break
+        if session_is_valid() and required_path and not any(
+            event["status"] == required_status for event in workspace_events
+        ):
+            raise AuthenticationError(
+                "API session_probe đã trả thành công nhưng chưa hoàn tất bước post-login bắt buộc "
+                f"({required_method} {required_path} HTTP {required_status})."
+            )
         raise AuthenticationError(
-            "Đã gửi form đăng nhập nhưng session_probe chưa trả mã thành công. "
-            "Kiểm tra tài khoản, MFA hoặc cấu hình xác thực của Application Profile."
+            "Đã gửi form đăng nhập nhưng chưa hoàn tất xác thực/điều hướng sau đăng nhập. "
+            "Kiểm tra tài khoản, MFA hoặc cấu hình post_login_readiness của Application Profile."
         )
     finally:
         if not page.is_closed():
