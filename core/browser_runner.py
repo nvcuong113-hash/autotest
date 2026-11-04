@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
+from core.action_registry import SEMANTIC_ACTIONS, TargetNotMappedError, execute_semantic_step
 from core.db import create_run, finish_run, save_result
 from core.test_generator import validate_steps_json
 
@@ -743,7 +744,8 @@ def inspect_page(target_url: str, base_url: str, headless: bool = True,
             gc.collect()
 
 def execute_case(case: dict[str, Any], page: Any, base_url: str,
-                 username: str = "", password: str = "") -> tuple[str, str, str]:
+                 username: str = "", password: str = "",
+                 application_profile: dict[str, Any] | None = None) -> tuple[str, str, str]:
     steps = validate_steps_json(case.get("steps_json", "[]"))
     if any(s.get("action") == "manual" for s in steps):
         raise ManualStepRequired("Case contains a manual placeholder. Add verified browser steps before execution.")
@@ -753,7 +755,26 @@ def execute_case(case: dict[str, Any], page: Any, base_url: str,
         selector = _substitute(step.get("selector", ""), variables)
         value = _substitute(step.get("value", ""), variables)
         timeout = min(int(step.get("timeout", 7000)), 30000)
-        if action == "goto":
+        semantic_step = dict(step)
+        for field in ("value", "expected"):
+            if field in semantic_step:
+                semantic_step[field] = _substitute(semantic_step[field], variables)
+        semantic = (
+            action == "navigate"
+            or action == "wait_for"
+            or action == "manual"
+            or bool(step.get("target"))
+            or (action == "expect_url" and ("expected" in step or "page" in step))
+            or (action == "expect_text" and "expected" in step)
+        )
+        if semantic:
+            if not application_profile:
+                raise ManualStepRequired("Test Case dùng semantic target nhưng dự án chưa chọn Application Profile.")
+            try:
+                execute_semantic_step(page, application_profile, semantic_step, base_url, variables)
+            except TargetNotMappedError as exc:
+                raise ManualStepRequired(str(exc)) from exc
+        elif action == "goto":
             url = _resolve_url(str(_substitute(step.get("url", "${BASE_URL}"), variables)), base_url)
             page.goto(url, wait_until="domcontentloaded", timeout=timeout)
         elif action == "fill":
@@ -798,7 +819,8 @@ def execute_case(case: dict[str, Any], page: Any, base_url: str,
 
 
 def run_suite(project_id: int, base_url: str, cases: list[dict[str, Any]],
-              username: str = "", password: str = "", headless: bool = True) -> dict[str, Any]:
+              username: str = "", password: str = "", headless: bool = True,
+              application_profile: dict[str, Any] | None = None) -> dict[str, Any]:
     parsed = urlparse(base_url.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("Enter a full Base URL including https:// or http://.")
@@ -812,16 +834,26 @@ def run_suite(project_id: int, base_url: str, cases: list[dict[str, Any]],
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
             browser = _launch_low_memory_browser(pw, True)
+            context = browser.new_context(
+                viewport={"width": 800, "height": 600},
+                device_scale_factor=1,
+                service_workers="block",
+                reduced_motion="reduce",
+            )
             try:
+                # One context per run: cookies/local storage can be reused by subsequent
+                # cases in the same suite. Each case still receives an isolated page.
                 for case in cases:
                     started = time.perf_counter()
-                    context = page = None
+                    page = None
                     screenshot_path = ""
                     try:
-                        context = browser.new_context(viewport={"width": 800, "height": 600}, device_scale_factor=1, service_workers="block", reduced_motion="reduce")
                         page = context.new_page()
                         page.set_default_timeout(7000)
-                        status, message, screenshot_path = execute_case(case, page, base_url.strip(), username, password)
+                        status, message, screenshot_path = execute_case(
+                            case, page, base_url.strip(), username, password,
+                            application_profile=application_profile,
+                        )
                     except ManualStepRequired as exc:
                         status, message = "BLOCKED", str(exc)
                     except Exception as exc:
@@ -833,8 +865,8 @@ def run_suite(project_id: int, base_url: str, cases: list[dict[str, Any]],
                         except Exception:
                             screenshot_path = ""
                     finally:
-                        if context:
-                            context.close()
+                        if page and not page.is_closed():
+                            page.close()
                         gc.collect()
                     duration = time.perf_counter() - started
                     save_result(run_id, int(case["id"]), status, message, screenshot_path, duration)
@@ -842,6 +874,7 @@ def run_suite(project_id: int, base_url: str, cases: list[dict[str, Any]],
                                     "message": message, "screenshot_path": screenshot_path,
                                     "duration_seconds": round(duration, 2)})
             finally:
+                context.close()
                 browser.close()
                 gc.collect()
     except Exception as exc:
