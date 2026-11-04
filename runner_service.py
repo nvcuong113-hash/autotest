@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from core.application_profile import load_application_profile
+from core.application_profile import load_application_profile, merge_profile_mappings
 from core.browser_runner import inspect_page, run_suite
 from core.db import init_db, mark_interrupted_runs
 
@@ -129,6 +129,11 @@ class RunnerHandler(BaseHTTPRequestHandler):
             application_profile = load_application_profile(
                 str(payload.get("application_profile_id") or "oap-meta")
             )
+            profile_mappings = payload.get("profile_mappings") or []
+            if not isinstance(profile_mappings, list) or len(profile_mappings) > 500:
+                self._send(400, {"error": "Danh sách mapping không hợp lệ hoặc vượt quá 500 target."})
+                return
+            application_profile = merge_profile_mappings(application_profile, profile_mappings)
             result = run_suite(
                 project_id=int(payload["project_id"]),
                 base_url=str(payload["base_url"]),
