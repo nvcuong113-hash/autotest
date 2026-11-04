@@ -130,6 +130,8 @@ def extract_requirements_with_ai(text: str, source: str = "") -> list[dict[str, 
             if normalized in seen:
                 continue
             seen.add(normalized)
+            if not req_key:
+                req_key = f"REQ-{len(extracted) + 1:03d}"
             metadata = {
                 "actor": str(item.get("actor") or "").strip(),
                 "preconditions": item.get("preconditions") if isinstance(item.get("preconditions"), list) else [],
