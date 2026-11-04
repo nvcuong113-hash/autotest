@@ -103,12 +103,11 @@ def _http_status(item: dict[str, Any]) -> int:
 
 def _safe_auth_text(value: Any) -> str:
     """Return short diagnostic text without email addresses or bearer/token strings."""
+    text = str(value or "")
     text = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/-]+=*", "Bearer [REDACTED]", text)
     text = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[email]", text)
     text = re.sub(r"(?i)(access[_-]?token|refresh[_-]?token|password)\s*[:=]\s*[^,;\s]+", r"\1=[REDACTED]", text)
-    text = re.sub(r"(?i)(access[_-]?token|refresh[_-]?token|password)\\s*[:=]\\s*[^,;\\s]+", r"\\1=[REDACTED]", text)
     return text[:240]
-
 
 def _auth_login_response_summary(status: int, payload: Any, content_type: str = "",
                                  has_set_cookie: bool = False) -> dict[str, Any]:
