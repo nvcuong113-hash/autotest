@@ -38,96 +38,149 @@ def _resolve_url(value: str, base_url: str) -> str:
 
 
 
-def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[str, Any]:
-    """Read-only inspection of a page on the configured target host.
+def _evaluate_with_navigation_retry(page: Any, script: str, attempts: int = 6) -> Any:
+    """Retry a read-only DOM snapshot when the application redirects during inspection."""
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return page.evaluate(script)
+        except Exception as exc:
+            last_error = exc
+            message = str(exc).lower()
+            transient = any(token in message for token in (
+                "execution context was destroyed",
+                "most likely because of a navigation",
+                "cannot find context with specified id",
+                "context was destroyed",
+                "navigation interrupted",
+            ))
+            if not transient or page.is_closed():
+                raise
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=3500)
+            except Exception:
+                pass
+            try:
+                page.wait_for_timeout(350 + attempt * 250)
+            except Exception:
+                if page.is_closed():
+                    raise
+    if last_error:
+        raise last_error
+    raise RuntimeError("Không thể đọc DOM sau nhiều lần thử.")
 
-    It does not fill fields, click buttons, submit forms or store browser cookies.
-    """
+
+def inspect_page(target_url: str, base_url: str, headless: bool = True) -> dict[str, Any]:
+    """Read-only inspection that follows application redirects and retries transient navigation."""
     if not base_url.strip():
-        raise ValueError("Configure the Base URL before inspecting a page.")
+        raise ValueError("Cần cấu hình Base URL trước khi kiểm tra.")
     url = _resolve_url(target_url.strip() or base_url.strip(), base_url.strip())
     parsed = urlparse(url)
     if parsed.username or parsed.password:
-        raise ValueError("Credentials are not allowed in the inspection URL.")
+        raise ValueError("Không đưa thông tin đăng nhập vào URL.")
 
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     screenshot_path = str(ARTIFACT_DIR / f"page-inspection-{time.time_ns()}.png")
+    document_responses: list[dict[str, Any]] = []
+    navigation_errors: list[str] = []
     from playwright.sync_api import sync_playwright
+
+    snapshot_script = r'''() => {
+        const clean = value => (value || '').trim().replace(/\\s+/g, ' ');
+        const cssEscape = value => (window.CSS && CSS.escape) ? CSS.escape(String(value)) : String(value).replace(/[^a-zA-Z0-9_-]/g, '\\\\$&');
+        const selectorFor = (el, tag) => {
+            if (el.id) return '#' + cssEscape(el.id);
+            const name = el.getAttribute('name');
+            if (name) return tag + '[name="' + String(name).replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"') + '"]';
+            const placeholder = el.getAttribute('placeholder');
+            if (placeholder) return tag + '[placeholder="' + String(placeholder).replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"') + '"]';
+            const aria = el.getAttribute('aria-label');
+            if (aria) return tag + '[aria-label="' + String(aria).replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"') + '"]';
+            return '';
+        };
+        const inputs = Array.from(document.querySelectorAll('input, textarea, select')).map((el, i) => {
+            const tag = el.tagName.toLowerCase();
+            const labels = el.labels ? Array.from(el.labels).map(x => clean(x.innerText || x.textContent)).filter(Boolean) : [];
+            return {index:i, tag, type:clean(el.getAttribute('type') || (tag === 'textarea' ? 'textarea' : tag)).toLowerCase(),
+                id:el.id || '', name:el.getAttribute('name') || '', placeholder:el.getAttribute('placeholder') || '',
+                aria_label:el.getAttribute('aria-label') || '', labels, required:!!el.required, disabled:!!el.disabled,
+                suggested_selector:selectorFor(el, tag)};
+        });
+        const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]')).map((el, i) => {
+            const tag = el.tagName.toLowerCase();
+            return {index:i, tag, text:clean(el.innerText || el.value || el.textContent).slice(0,160),
+                aria_label:el.getAttribute('aria-label') || '', title:el.getAttribute('title') || '',
+                type:el.getAttribute('type') || '', disabled:!!el.disabled, suggested_selector:selectorFor(el, tag)};
+        });
+        const headings = Array.from(document.querySelectorAll('h1, h2, h3')).slice(0,80)
+            .map(el => ({level:el.tagName.toLowerCase(), text:clean(el.innerText || el.textContent).slice(0,200)})).filter(x => x.text);
+        const forms = Array.from(document.querySelectorAll('form')).map((el, i) => ({index:i,
+            method:(el.getAttribute('method') || 'get').toUpperCase(), action:el.action || '', id:el.id || '', name:el.getAttribute('name') || ''}));
+        const links = Array.from(document.querySelectorAll('a[href]')).slice(0,100).map((el, i) => ({
+            index:i, text:clean(el.innerText || el.textContent).slice(0,120), href:el.href}));
+        return {title:document.title || '', final_url:location.href, headings, forms, inputs, buttons, links,
+            body_text_preview:clean(document.body ? document.body.innerText : '').slice(0,2500)};
+    }'''
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=headless)
         try:
-            context = browser.new_context(viewport={"width": 1440, "height": 1000})
+            context = browser.new_context(viewport={"width":1440,"height":1000})
             page = context.new_page()
             page.set_default_timeout(8000)
-            response = page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            page.wait_for_timeout(800)
-
-            inputs = page.locator("input, textarea, select").evaluate_all(
-                """els => els.map((el, i) => {
-                    const labels = el.labels ? Array.from(el.labels).map(x => (x.innerText || x.textContent || '').trim()).filter(Boolean) : [];
-                    const tag = el.tagName.toLowerCase();
-                    const type = (el.getAttribute('type') || (tag === 'textarea' ? 'textarea' : tag)).toLowerCase();
-                    const id = el.id || '';
-                    const name = el.getAttribute('name') || '';
-                    const placeholder = el.getAttribute('placeholder') || '';
-                    let suggested = '';
-                    if (id) suggested = '#' + CSS.escape(id);
-                    else if (name) suggested = tag + '[name="' + CSS.escape(name) + '"]';
-                    else if (placeholder) suggested = tag + '[placeholder="' + CSS.escape(placeholder) + '"]';
-                    return {index:i, tag, type, id, name, placeholder,
-                            aria_label:el.getAttribute('aria-label') || '',
-                            labels, required:!!el.required, disabled:!!el.disabled,
-                            suggested_selector:suggested};
-                })"""
-            )
-            buttons = page.locator("button, [role='button'], input[type='submit'], input[type='button']").evaluate_all(
-                """els => els.map((el, i) => {
-                    const tag = el.tagName.toLowerCase();
-                    const text = (el.innerText || el.value || el.textContent || '').trim().replace(/\\\\s+/g, ' ');
-                    const aria = el.getAttribute('aria-label') || '';
-                    const title = el.getAttribute('title') || '';
-                    const id = el.id || '';
-                    const name = el.getAttribute('name') || '';
-                    let suggested = '';
-                    if (id) suggested = '#' + CSS.escape(id);
-                    else if (name) suggested = tag + '[name="' + CSS.escape(name) + '"]';
-                    return {index:i, tag, text:text.slice(0,160), aria_label:aria, title,
-                            type:el.getAttribute('type') || '', disabled:!!el.disabled,
-                            suggested_selector:suggested};
-                })"""
-            )
-            links = page.locator("a[href]").evaluate_all(
-                """els => els.slice(0,100).map((el, i) => ({
-                    index:i, text:(el.innerText || el.textContent || '').trim().replace(/\\\\s+/g, ' ').slice(0,120),
-                    href:el.href
-                }))"""
-            )
-            headings = page.locator("h1, h2, h3").evaluate_all(
-                """els => els.slice(0,80).map(el => ({
-                    level:el.tagName.toLowerCase(),
-                    text:(el.innerText || el.textContent || '').trim().replace(/\\\\s+/g, ' ').slice(0,200)
-                })).filter(x => x.text)"""
-            )
-            forms = page.locator("form").evaluate_all(
-                """els => els.map((el, i) => ({
-                    index:i, method:(el.getAttribute('method') || 'get').toUpperCase(),
-                    action:el.action || '', id:el.id || '', name:el.getAttribute('name') || ''
-                }))"""
-            )
-            page.screenshot(path=screenshot_path, full_page=True, timeout=10000)
+            def on_response(response: Any) -> None:
+                try:
+                    if response.request.resource_type == "document":
+                        document_responses.append({"url":response.url,"status":response.status})
+                except Exception:
+                    pass
+            page.on("response", on_response)
+            try:
+                page.goto(url, wait_until="commit", timeout=25000)
+            except Exception as exc:
+                navigation_errors.append(f"Điều hướng ban đầu: {type(exc).__name__}: {exc}")
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=12000)
+            except Exception as exc:
+                navigation_errors.append(f"Chờ DOMContentLoaded: {type(exc).__name__}: {exc}")
+            try:
+                page.wait_for_timeout(1200)
+            except Exception:
+                pass
+            snapshot = {"title":"", "final_url":page.url, "headings":[], "forms":[], "inputs":[], "buttons":[], "links":[], "body_text_preview":""}
+            try:
+                snapshot = _evaluate_with_navigation_retry(page, snapshot_script)
+            except Exception as exc:
+                navigation_errors.append(f"Đọc DOM: {type(exc).__name__}: {exc}")
+            screenshot_saved = False
+            for attempt in range(3):
+                try:
+                    page.screenshot(path=screenshot_path, full_page=True, timeout=10000)
+                    screenshot_saved = True
+                    break
+                except Exception as exc:
+                    navigation_errors.append(f"Chụp màn hình lần {attempt + 1}: {type(exc).__name__}: {exc}")
+                    if page.is_closed():
+                        break
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=3000)
+                    except Exception:
+                        pass
+                    try:
+                        page.wait_for_timeout(500)
+                    except Exception:
+                        pass
+            if not screenshot_saved:
+                screenshot_path = ""
             return {
-                "requested_url": url,
-                "final_url": page.url,
-                "http_status": response.status if response else None,
-                "title": page.title(),
-                "headings": headings,
-                "forms": forms,
-                "inputs": inputs,
-                "buttons": buttons,
-                "links": links,
-                "screenshot_path": screenshot_path,
-                "read_only": True,
+                "requested_url":url, "final_url":snapshot.get("final_url") or (page.url if not page.is_closed() else ""),
+                "http_status":document_responses[-1]["status"] if document_responses else None,
+                "title":snapshot.get("title", ""), "headings":snapshot.get("headings", []),
+                "forms":snapshot.get("forms", []), "inputs":snapshot.get("inputs", []),
+                "buttons":snapshot.get("buttons", []), "links":snapshot.get("links", []),
+                "body_text_preview":snapshot.get("body_text_preview", ""),
+                "document_responses":document_responses, "navigation_errors":navigation_errors,
+                "screenshot_path":screenshot_path, "read_only":True,
             }
         finally:
             browser.close()
