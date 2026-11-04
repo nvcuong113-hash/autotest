@@ -16,7 +16,11 @@ print("[AUTOTEST_BOOT] app.py started", flush=True)
 try:
     import pandas as pd
 
-    from core.ai_generator import generate_cases_with_ai
+    from core.ai_generator import extract_requirements_with_ai, generate_cases_with_ai
+    from core.ai_provider import get_ai_status
+    from core.application_profile import (
+        get_profile_mapping_summary, list_application_profiles, load_application_profile,
+    )
     from core.runner_client import inspect_page, run_suite
     from core.db import (
         add_test_cases, create_project, init_db, list_projects, list_requirements,
@@ -92,8 +96,39 @@ with st.sidebar:
         st.success("Browser Runner: đã cấu hình dịch vụ riêng")
     else:
         st.error("Browser Runner chưa được cấu hình. Không chạy Playwright trực tiếp trong Web Service 512 MB.")
+    ai_status = get_ai_status()
+    if ai_status.configured:
+        st.success(f"AI: Gemini · {ai_status.model}")
+    else:
+        st.info("AI chưa cấu hình. Thêm GEMINI_API_KEY để bật Gemini; chức năng parser cục bộ vẫn dùng được.")
+    profile_options = list_application_profiles()
+    profile_ids = [item["profile_id"] for item in profile_options]
+    if not profile_ids:
+        st.error("Chưa có Application Profile nào trong application_profiles/.")
+        st.stop()
+    application_profile_id = st.selectbox(
+        "Ứng dụng / Application Profile",
+        profile_ids,
+        index=profile_ids.index("oap-meta") if "oap-meta" in profile_ids else 0,
+        format_func=lambda value: next(
+            (item["name"] for item in profile_options if item["profile_id"] == value), value
+        ),
+        key="application_profile_id",
+    )
+    application_profile = load_application_profile(application_profile_id)
+    mapping_summary = get_profile_mapping_summary(application_profile)
+    st.caption(
+        f"Profile v{application_profile.get('version', '1.0.0')} · "
+        f"{mapping_summary['page_count']} màn hình · "
+        f"{mapping_summary['verified_target_count']} target đã xác minh"
+    )
     st.caption("Cấu hình kiểm thử trình duyệt")
-    base_url = st.text_input("Địa chỉ hệ thống (Base URL)", placeholder="https://staging.example.com")
+    base_url = st.text_input(
+        "Địa chỉ hệ thống (Base URL)",
+        value=str(application_profile.get("default_base_url") or ""),
+        placeholder="https://staging.example.com",
+        key=f"base_url_{application_profile_id}",
+    )
     username = st.text_input("Tài khoản kiểm thử", key="test_username")
     password = st.text_input("Mật khẩu kiểm thử", type="password", key="test_password")
     headless = st.checkbox("Chạy trình duyệt ẩn", value=True)
@@ -142,13 +177,24 @@ with tab_srs:
     st.subheader("Nhập tài liệu SRS")
     st.caption("Định dạng hỗ trợ: PDF, DOCX, XLSX, CSV, TXT, Markdown, RST, YAML và JSON.")
     upload = st.file_uploader("Tải lên tài liệu đặc tả", type=["pdf","docx","xlsx","xlsm","csv","txt","md","rst","yaml","yml","json"], key=f"upload_{pid}")
+    use_gemini_srs = st.checkbox(
+        f"Phân tích ngữ nghĩa bằng Gemini 3.5 Flash-Lite ({ai_status.model})",
+        value=ai_status.configured,
+        disabled=not ai_status.configured,
+        key=f"gemini_srs_{pid}",
+    )
     if upload and st.button("Phân tích SRS và trích xuất yêu cầu", type="primary"):
         try:
-            raw, extracted = parse_srs(upload.name, upload.getvalue())
+            raw, local_extracted = parse_srs(upload.name, upload.getvalue())
+            extracted = (
+                extract_requirements_with_ai(raw, upload.name)
+                if use_gemini_srs else local_extracted
+            )
             st.session_state["srs_raw"] = raw
             st.session_state["srs_items"] = extracted
             st.session_state["srs_name"] = upload.name
-            st.success(f"Đã nhận diện {len(extracted)} yêu cầu tiềm năng. Vui lòng rà soát trước khi lưu.")
+            method = "Gemini" if use_gemini_srs else "parser cục bộ"
+            st.success(f"Đã nhận diện {len(extracted)} yêu cầu bằng {method}. Vui lòng rà soát trước khi lưu.")
         except Exception as exc:
             st.error(f"Không thể đọc tài liệu: {exc}")
     extracted = st.session_state.get("srs_items", [])
@@ -197,14 +243,20 @@ with tab_cases:
     if requirements:
         req_keys = [r["req_key"] for r in requirements]
         selected_req = st.multiselect("Chọn các yêu cầu cần tạo Test Case", req_keys, default=req_keys)
-        use_ai = st.checkbox("Sử dụng AI để hỗ trợ tạo Test Case (không bắt buộc)")
-        ai_key = st.text_input("Khóa API OpenAI", value=os.getenv("OPENAI_API_KEY",""), type="password") if use_ai else ""
+        use_ai = st.checkbox(
+            f"Dùng Gemini 3.5 Flash-Lite ({ai_status.model}) để thiết kế Test Case",
+            value=ai_status.configured,
+            disabled=not ai_status.configured,
+            key=f"gemini_testcases_{pid}",
+        )
+        if not ai_status.configured:
+            st.caption("Muốn dùng AI: cấu hình GEMINI_API_KEY trong Render Environment. Không cần OpenAI API key.")
         if st.button("Sinh Test Case", type="primary", disabled=not selected_req):
             selected = [r for r in requirements if r["req_key"] in selected_req]
             try:
-                generated = generate_cases_with_ai(selected, ai_key) if use_ai else generate_cases(selected)
+                generated = generate_cases_with_ai(selected) if use_ai else generate_cases(selected)
                 count = add_test_cases(pid, generated)
-                st.success(f"Đã tạo thêm {count} Test Case dạng bản nháp.")
+                st.success(f"Đã tạo thêm {count} Test Case. Hãy rà soát mức tự động hóa và mapping target trước khi chạy.")
                 st.rerun()
             except Exception as exc:
                 st.error(f"Không thể tạo Test Case: {exc}")
@@ -214,9 +266,11 @@ with tab_cases:
     cases = list_test_cases(pid)
     st.subheader("Danh mục Test Case")
     if cases:
-        case_view = pd.DataFrame(cases)[["case_key","req_key","title","test_type","priority"]].rename(
+        case_columns = ["case_key","req_key","title","test_type","priority","automation_level"]
+        case_view = pd.DataFrame(cases)[case_columns].rename(
             columns={"case_key":"Mã Test Case","req_key":"Mã yêu cầu","title":"Tên Test Case",
-                     "test_type":"Loại kiểm thử","priority":"Mức ưu tiên"})
+                     "test_type":"Loại kiểm thử","priority":"Mức ưu tiên",
+                     "automation_level":"Mức tự động hóa"})
         type_labels = {"Positive":"Tích cực","Negative":"Tiêu cực","Boundary":"Kiểm thử biên",
                        "Authorization":"Phân quyền","Integration":"Tích hợp","UI":"Giao diện",
                        "Functional":"Chức năng","Performance":"Hiệu năng"}
@@ -426,7 +480,10 @@ with tab_run:
         default = []
         for c in enabled_cases:
             try:
-                if not any(s.get("action") == "manual" for s in json.loads(c["steps_json"])):
+                steps = json.loads(c["steps_json"])
+                if c.get("automation_level") == "automatable" and not any(
+                    step.get("action") == "manual" for step in steps
+                ):
                     default.append(c["case_key"])
             except Exception:
                 pass
@@ -438,7 +495,10 @@ with tab_run:
             else:
                 selection = [c for c in enabled_cases if c["case_key"] in chosen]
                 with st.spinner("Đang khởi chạy Chromium và thực thi kiểm thử..."):
-                    outcome = run_suite(pid, base_url.strip(), selection, username, password, headless)
+                    outcome = run_suite(
+                        pid, base_url.strip(), selection, username, password, headless,
+                        application_profile_id=application_profile_id,
+                    )
                 st.session_state["last_run"] = outcome
                 st.rerun()
     else:
