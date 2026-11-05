@@ -23,7 +23,7 @@ try:
         merge_profile_mappings,
     )
     from core.automation_assessment import (
-        assess_cases, assessment_summary, build_mapping_coverage,
+        assess_cases, assess_test_case, assessment_summary, build_mapping_coverage,
     )
     from core.runner_client import inspect_page, run_suite
     from core.db import (
@@ -684,9 +684,164 @@ with tab_mapping:
             st.success("Đã gỡ mapping. Các Test Case tham chiếu target này sẽ bị chặn cho đến khi mapping hợp lệ được khôi phục.")
             st.rerun()
 
+    st.divider()
+    st.subheader("Workflow Builder — gán mapping vào Test Case")
+    st.caption(
+        "Đây là bước còn thiếu khi Test Case đang có placeholder manual: chọn Test Case, "
+        "xây dựng các thao tác nghiệp vụ bằng semantic target đã mapping, thêm assertion rồi lưu. "
+        "Không cần viết CSS/XPath hoặc JSON bằng tay."
+    )
+
+    workflow_cases = list_test_cases(pid)
+    if not workflow_cases:
+        st.info("Chưa có Test Case để xây dựng workflow.")
+    else:
+        workflow_case_options = {
+            f"{item['case_key']} — {item['title']}": item
+            for item in workflow_cases
+        }
+        workflow_case_label = st.selectbox(
+            "Test Case cần gán workflow",
+            list(workflow_case_options),
+            key=f"workflow_case_select_{pid}",
+        )
+        workflow_case = workflow_case_options[workflow_case_label]
+
+        workflow_pages = list((effective_profile.get("pages") or {}).keys())
+        workflow_targets = set()
+        for page_id, page in (effective_profile.get("pages") or {}).items():
+            for target_id in (page.get("targets") or {}):
+                workflow_targets.add(str(target_id))
+        for target_id in (effective_profile.get("shared_targets") or {}):
+            workflow_targets.add(str(target_id))
+        workflow_target_options = [""] + sorted(workflow_targets)
+
+        existing_steps = []
+        try:
+            parsed_steps = json.loads(workflow_case.get("steps_json") or "[]")
+            if isinstance(parsed_steps, list):
+                existing_steps = [
+                    step for step in parsed_steps
+                    if isinstance(step, dict) and step.get("action") != "manual"
+                ]
+        except (TypeError, json.JSONDecodeError):
+            existing_steps = []
+
+        workflow_rows = []
+        for index, step in enumerate(existing_steps, 1):
+            workflow_rows.append({
+                "order": index,
+                "action": str(step.get("action") or "click"),
+                "page": str(step.get("page") or ""),
+                "target": str(step.get("target") or ""),
+                "value": str(step.get("value") or ""),
+                "expected": str(step.get("expected") or step.get("contains") or ""),
+            })
+        if not workflow_rows:
+            workflow_rows = [{
+                "order": 1,
+                "action": "navigate",
+                "page": workflow_pages[0] if workflow_pages else "",
+                "target": "",
+                "value": "",
+                "expected": "",
+            }]
+
+        workflow_action_options = [
+            "navigate", "click", "fill", "select_option", "check", "uncheck",
+            "expect_visible", "expect_hidden", "expect_text", "expect_url",
+            "wait_for", "assert_state",
+        ]
+        workflow_editor = st.data_editor(
+            pd.DataFrame(workflow_rows, columns=[
+                "order", "action", "page", "target", "value", "expected",
+            ]),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key=f"workflow_editor_{pid}_{workflow_case['id']}",
+            column_config={
+                "order": st.column_config.NumberColumn("Thứ tự", min_value=1, step=1),
+                "action": st.column_config.SelectboxColumn(
+                    "Thao tác",
+                    options=workflow_action_options,
+                    required=True,
+                ),
+                "page": st.column_config.SelectboxColumn(
+                    "Page (để trống nếu dùng page hiện tại)",
+                    options=[""] + workflow_pages,
+                ),
+                "target": st.column_config.SelectboxColumn(
+                    "Semantic target đã mapping",
+                    options=workflow_target_options,
+                ),
+                "value": st.column_config.TextColumn("Giá trị nhập / chọn"),
+                "expected": st.column_config.TextColumn("Kết quả cần kiểm chứng"),
+            },
+        )
+        st.caption(
+            "Ví dụ: navigate → fill (target ô tìm kiếm) → click (target nút Tìm kiếm) "
+            "→ expect_visible (target bảng kết quả). Với kết quả toàn trang, dùng expect_text và điền expected."
+        )
+
+        if st.button(
+            "Lưu workflow và đánh giá Test Case",
+            type="primary",
+            key=f"save_workflow_{pid}_{workflow_case['id']}",
+        ):
+            try:
+                normalized_rows = workflow_editor.to_dict("records")
+                normalized_rows.sort(key=lambda row: int(row.get("order") or 999999))
+                new_steps = []
+                for index, row in enumerate(normalized_rows, 1):
+                    action = str(row.get("action") or "").strip()
+                    if not action:
+                        continue
+                    page_value = str(row.get("page") or "").strip()
+                    target_value = str(row.get("target") or "").strip()
+                    value_text = str(row.get("value") or "").strip()
+                    expected_text = str(row.get("expected") or "").strip()
+                    step = {"action": action}
+                    if page_value:
+                        step["page"] = page_value
+                    if target_value:
+                        step["target"] = target_value
+                    if value_text:
+                        step["value"] = value_text
+                    if expected_text:
+                        step["expected"] = expected_text
+                    if action == "navigate" and not page_value:
+                        raise ValueError(f"Bước {index}: navigate phải chọn Page.")
+                    if action in {"click", "fill", "select_option", "check", "uncheck",
+                                  "expect_visible", "expect_hidden", "assert_state"} and not target_value:
+                        raise ValueError(f"Bước {index}: {action} phải chọn semantic target.")
+                    new_steps.append(step)
+
+                validate_steps_json(new_steps)
+                updated_case = dict(workflow_case)
+                updated_case["steps_json"] = json.dumps(new_steps, ensure_ascii=False)
+                assessment = assess_test_case(updated_case, effective_profile)
+                update_test_case(int(workflow_case["id"]), {
+                    "steps_json": updated_case["steps_json"],
+                    "automation_level": assessment["recommended_level"],
+                })
+                if assessment["status"] == "READY":
+                    st.success(
+                        "Đã lưu workflow. Test Case đủ điều kiện tự động hóa; "
+                        "đã cập nhật mức automatable."
+                    )
+                else:
+                    st.warning(
+                        "Đã lưu workflow nhưng Test Case vẫn BLOCKED: "
+                        + (assessment["blocked_reason"] or "Cần rà soát thêm.")
+                    )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Không thể lưu workflow: {type(exc).__name__}: {exc}")
+
     st.info(
-        "Lưu ý: Mapping chỉ giải quyết locator. Test Case mẫu đang có bước manual vẫn cần được chuyển thành "
-        "workflow nghiệp vụ có assertion; không có cơ chế tự đổi manual thành tự động chỉ bằng cách thêm selector."
+        "Quy tắc an toàn: mapping chỉ gắn locator vào semantic target; Workflow Builder mới gắn target "
+        "vào các bước nghiệp vụ. Chỉ case có đủ mapping đã xác minh và assertion mới được mở khóa chạy."
     )
 
 with tab_run:
