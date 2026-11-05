@@ -1,0 +1,318 @@
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import uuid
+from pathlib import Path
+from typing import Any
+
+DB_PATH = os.getenv("AUTOTEST_DB", "data/autotest.sqlite3")
+
+
+def connect(db_path: str | None = None) -> sqlite3.Connection:
+    path = db_path or DB_PATH
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def init_db(db_path: str | None = None) -> None:
+    with connect(db_path) as conn:
+        conn.executescript("""
+        CREATE TABLE IF NOT EXISTS projects (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+          description TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS requirements (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          req_key TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL,
+          source TEXT DEFAULT '', metadata_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(project_id, req_key)
+        );
+        CREATE TABLE IF NOT EXISTS test_cases (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          requirement_id INTEGER REFERENCES requirements(id) ON DELETE SET NULL,
+          case_key TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+          test_type TEXT NOT NULL DEFAULT 'Functional', priority TEXT NOT NULL DEFAULT 'Medium',
+          preconditions TEXT DEFAULT '', steps_json TEXT NOT NULL DEFAULT '[]',
+          expected_result TEXT DEFAULT '', source_ref TEXT DEFAULT '',
+          automation_level TEXT NOT NULL DEFAULT 'manual', enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS application_mappings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          profile_id TEXT NOT NULL,
+          page_id TEXT NOT NULL DEFAULT '',
+          target_id TEXT NOT NULL,
+          locator_by TEXT NOT NULL,
+          locator_value TEXT NOT NULL,
+          locator_name TEXT DEFAULT '',
+          exact INTEGER NOT NULL DEFAULT 1,
+          verified INTEGER NOT NULL DEFAULT 0,
+          evidence TEXT DEFAULT '',
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(project_id, profile_id, page_id, target_id)
+        );
+        CREATE TABLE IF NOT EXISTS test_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          base_url TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'RUNNING',
+          started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, finished_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS test_results (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          run_id INTEGER NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
+          case_id INTEGER NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+          status TEXT NOT NULL, message TEXT DEFAULT '', screenshot_path TEXT DEFAULT '',
+          duration_seconds REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_req_project ON requirements(project_id);
+        CREATE INDEX IF NOT EXISTS idx_case_project ON test_cases(project_id);
+        CREATE INDEX IF NOT EXISTS idx_mapping_project_profile ON application_mappings(project_id, profile_id);
+        CREATE INDEX IF NOT EXISTS idx_result_run ON test_results(run_id);
+        """)
+        # Lightweight migrations for databases created by earlier AutoTest versions.
+        req_columns = {row["name"] for row in conn.execute("PRAGMA table_info(requirements)")}
+        if "metadata_json" not in req_columns:
+            conn.execute("ALTER TABLE requirements ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
+        case_columns = {row["name"] for row in conn.execute("PRAGMA table_info(test_cases)")}
+        if "source_ref" not in case_columns:
+            conn.execute("ALTER TABLE test_cases ADD COLUMN source_ref TEXT DEFAULT ''")
+        if "automation_level" not in case_columns:
+            conn.execute("ALTER TABLE test_cases ADD COLUMN automation_level TEXT NOT NULL DEFAULT 'manual'")
+
+
+def create_project(name: str, description: str = "", db_path: str | None = None) -> int:
+    name = name.strip()
+    if not name:
+        raise ValueError("Project name is required.")
+    with connect(db_path) as conn:
+        conn.execute("INSERT OR IGNORE INTO projects(name,description) VALUES (?,?)", (name, description.strip()))
+        row = conn.execute("SELECT id FROM projects WHERE name=?", (name,)).fetchone()
+        return int(row["id"])
+
+
+def list_projects(db_path: str | None = None) -> list[dict[str, Any]]:
+    with connect(db_path) as conn:
+        return [dict(x) for x in conn.execute("SELECT * FROM projects ORDER BY name")]
+
+
+def save_requirements(project_id: int, items: list[dict[str, Any]], db_path: str | None = None) -> int:
+    saved = 0
+    with connect(db_path) as conn:
+        for item in items:
+            key, title, desc = (str(item.get(k) or "").strip() for k in ("req_key", "title", "description"))
+            if not key or not title or not desc:
+                continue
+            metadata_raw = item.get("metadata_json")
+            if isinstance(metadata_raw, str) and metadata_raw.strip():
+                try:
+                    metadata = json.loads(metadata_raw)
+                except json.JSONDecodeError:
+                    metadata = {}
+            elif isinstance(metadata_raw, dict):
+                metadata = metadata_raw
+            else:
+                metadata = item.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {name: item.get(name) for name in (
+                    "actor", "preconditions", "business_rules", "acceptance_criteria", "source_ref"
+                ) if item.get(name) not in (None, "", [])}
+            metadata_json = json.dumps(metadata, ensure_ascii=False)
+            conn.execute("""INSERT INTO requirements(project_id,req_key,title,description,source,metadata_json)
+                VALUES (?,?,?,?,?,?) ON CONFLICT(project_id,req_key) DO UPDATE SET
+                title=excluded.title,description=excluded.description,source=excluded.source,
+                metadata_json=excluded.metadata_json""",
+                (project_id, key, title, desc, str(item.get("source") or ""), metadata_json))
+            saved += 1
+    return saved
+
+
+def list_requirements(project_id: int, db_path: str | None = None) -> list[dict[str, Any]]:
+    with connect(db_path) as conn:
+        return [dict(x) for x in conn.execute(
+            "SELECT * FROM requirements WHERE project_id=? ORDER BY req_key", (project_id,))]
+
+
+def add_test_cases(project_id: int, cases: list[dict[str, Any]], db_path: str | None = None) -> int:
+    saved = 0
+    with connect(db_path) as conn:
+        req_ids = {x["req_key"]: x["id"] for x in conn.execute(
+            "SELECT id,req_key FROM requirements WHERE project_id=?", (project_id,))}
+        for case in cases:
+            title = str(case.get("title") or "").strip()
+            if not title:
+                continue
+            key = str(case.get("case_key") or f"TC-{uuid.uuid4().hex[:8].upper()}")
+            # Case keys are globally unique in the current SQLite schema. Prefix a
+            # built-in suite key when the same catalogue is imported into another project.
+            collision = conn.execute("SELECT project_id FROM test_cases WHERE case_key=?", (key,)).fetchone()
+            if collision and int(collision["project_id"]) != project_id:
+                key = f"P{project_id}-{key}"
+            steps = case.get("steps", [])
+            steps_json = steps if isinstance(steps, str) else __import__("json").dumps(steps, ensure_ascii=False)
+            cur = conn.execute("""INSERT OR IGNORE INTO test_cases
+                (project_id,requirement_id,case_key,title,test_type,priority,preconditions,steps_json,expected_result,source_ref,automation_level)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (project_id, req_ids.get(str(case.get("req_key") or "")), key, title,
+                 str(case.get("test_type") or "Functional"), str(case.get("priority") or "Medium"),
+                 str(case.get("preconditions") or ""), steps_json, str(case.get("expected_result") or ""),
+                 str(case.get("source_ref") or ""), str(case.get("automation_level") or "manual")))
+            saved += int(cur.rowcount > 0)
+    return saved
+
+
+def list_test_cases(project_id: int, db_path: str | None = None) -> list[dict[str, Any]]:
+    with connect(db_path) as conn:
+        return [dict(x) for x in conn.execute("""SELECT tc.*,r.req_key FROM test_cases tc
+            LEFT JOIN requirements r ON r.id=tc.requirement_id
+            WHERE tc.project_id=? ORDER BY tc.created_at DESC,tc.case_key""", (project_id,))]
+
+
+def update_test_case(case_id: int, fields: dict[str, Any], db_path: str | None = None) -> None:
+    allowed = {"title", "test_type", "priority", "preconditions", "steps_json", "expected_result", "source_ref", "automation_level", "enabled"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return
+    cols = [f"{k}=?" for k in updates]
+    vals = list(updates.values())
+    cols.append("updated_at=CURRENT_TIMESTAMP")
+    with connect(db_path) as conn:
+        conn.execute(f"UPDATE test_cases SET {','.join(cols)} WHERE id=?", (*vals, case_id))
+
+
+def list_application_mappings(
+    project_id: int,
+    profile_id: str,
+    db_path: str | None = None,
+) -> list[dict[str, Any]]:
+    with connect(db_path) as conn:
+        return [dict(row) for row in conn.execute(
+            """SELECT * FROM application_mappings
+               WHERE project_id=? AND profile_id=?
+               ORDER BY page_id,target_id""",
+            (project_id, profile_id),
+        ).fetchall()]
+
+
+def save_application_mappings(
+    project_id: int,
+    profile_id: str,
+    mappings: list[dict[str, Any]],
+    db_path: str | None = None,
+) -> int:
+    allowed = {"css", "role", "label", "placeholder", "text"}
+    saved = 0
+    with connect(db_path) as conn:
+        for item in mappings:
+            page_id = str(item.get("page_id") or "").strip()
+            target_id = str(item.get("target_id") or "").strip()
+            strategy = str(item.get("locator_by") or "").strip().lower()
+            value = str(item.get("locator_value") or "").strip()
+            if not target_id or target_id.startswith("auth."):
+                raise ValueError("Target nghiệp vụ không hợp lệ hoặc đang cố ghi đè target xác thực.")
+            if strategy not in allowed or not value:
+                raise ValueError(f"Mapping '{target_id}' thiếu locator hợp lệ.")
+            conn.execute(
+                """INSERT INTO application_mappings
+                   (project_id,profile_id,page_id,target_id,locator_by,locator_value,
+                    locator_name,exact,verified,evidence,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                   ON CONFLICT(project_id,profile_id,page_id,target_id) DO UPDATE SET
+                    locator_by=excluded.locator_by,
+                    locator_value=excluded.locator_value,
+                    locator_name=excluded.locator_name,
+                    exact=excluded.exact,
+                    verified=excluded.verified,
+                    evidence=excluded.evidence,
+                    updated_at=CURRENT_TIMESTAMP""",
+                (
+                    project_id, profile_id, page_id, target_id, strategy, value,
+                    str(item.get("locator_name") or "").strip(),
+                    int(bool(item.get("exact", True))),
+                    int(bool(item.get("verified", False))),
+                    str(item.get("evidence") or "").strip(),
+                ),
+            )
+            saved += 1
+    return saved
+
+
+def delete_application_mapping(
+    project_id: int,
+    profile_id: str,
+    page_id: str,
+    target_id: str,
+    db_path: str | None = None,
+) -> int:
+    with connect(db_path) as conn:
+        cursor = conn.execute(
+            """DELETE FROM application_mappings
+               WHERE project_id=? AND profile_id=? AND page_id=? AND target_id=?""",
+            (project_id, profile_id, page_id or "", target_id),
+        )
+        return int(cursor.rowcount)
+
+
+def create_run(project_id: int, base_url: str, db_path: str | None = None) -> int:
+    with connect(db_path) as conn:
+        cur = conn.execute("INSERT INTO test_runs(project_id,base_url) VALUES (?,?)", (project_id, base_url))
+        return int(cur.lastrowid)
+
+
+def save_result(run_id: int, case_id: int, status: str, message: str,
+                screenshot_path: str = "", duration_seconds: float = 0, db_path: str | None = None) -> None:
+    with connect(db_path) as conn:
+        conn.execute("""INSERT INTO test_results(run_id,case_id,status,message,screenshot_path,duration_seconds)
+            VALUES (?,?,?,?,?,?)""", (run_id, case_id, status, message, screenshot_path, duration_seconds))
+
+
+def finish_run(run_id: int, status: str, db_path: str | None = None) -> None:
+    with connect(db_path) as conn:
+        conn.execute("UPDATE test_runs SET status=?,finished_at=CURRENT_TIMESTAMP WHERE id=?", (status, run_id))
+
+
+def list_runs(project_id: int, db_path: str | None = None) -> list[dict[str, Any]]:
+    with connect(db_path) as conn:
+        return [dict(x) for x in conn.execute(
+            "SELECT * FROM test_runs WHERE project_id=? ORDER BY id DESC", (project_id,))]
+
+
+def list_results(project_id: int, db_path: str | None = None) -> list[dict[str, Any]]:
+    with connect(db_path) as conn:
+        return [dict(x) for x in conn.execute("""SELECT tr.*,tc.case_key,tc.title AS case_title,ru.base_url
+            FROM test_results tr JOIN test_runs ru ON ru.id=tr.run_id
+            JOIN test_cases tc ON tc.id=tr.case_id WHERE ru.project_id=? ORDER BY tr.id DESC""", (project_id,))]
+
+
+# Use durable PostgreSQL whenever DATABASE_URL is supplied by the hosting platform.
+# SQLite remains available for local development and isolated unit tests.
+if os.getenv("DATABASE_URL", "").strip():
+    from core.pg_db import (
+        add_test_cases,
+        create_project,
+        create_run,
+        finish_run,
+        init_db,
+        list_projects,
+        list_requirements,
+        list_application_mappings,
+        delete_application_mapping,
+        save_application_mappings,
+        list_results,
+        list_runs,
+        list_test_cases,
+        mark_interrupted_runs,
+        save_requirements,
+        save_result,
+        update_test_case,
+    )

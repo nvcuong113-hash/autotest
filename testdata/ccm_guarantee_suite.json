@@ -1,0 +1,1319 @@
+{
+  "suite_id": "CCM-BANK-GUARANTEE-V1",
+  "suite_name": "CCM — Bank Guarantee Management",
+  "source_document": "Tai_Lieu_Nghiep_Vu_CCM_QuanLy_BaoLanh_NganHang_V1.docx",
+  "source_version": "BRD-CCM-GUARANTEE V1.0 / Release 1.0",
+  "language": "vi",
+  "note": "Các test case được trích xuất/biên soạn từ BRD. Mỗi case đang có bước manual để chờ xác nhận selector và dữ liệu staging. Không chạy tự động cho đến khi được chuyển thành browser steps đã xác minh.",
+  "requirements": [
+    {
+      "req_key": "BG-REQ-OW-01",
+      "title": "Khởi tạo và quản lý dữ liệu Bảo lãnh đi",
+      "description": "Tạo đề xuất bảo lãnh đi; kế thừa dữ liệu pháp nhân, loại bảo lãnh, bên thụ hưởng, hợp đồng ERP, ngân hàng, tiền tệ và tài liệu theo các trường 1-22.",
+      "source": "BRD-CCM-GUARANTEE V1.0, mục 2.1, 3.1, 3.3, trang 1-8"
+    },
+    {
+      "req_key": "BG-REQ-OW-02",
+      "title": "Kiểm soát trạng thái và luồng phê duyệt Outward",
+      "description": "Kiểm soát DRAFT, REVIEW, PENDING_APPROVAL, REJECTED, APPROVED, Awaiting Release, ACTIVE, AMENDED, EXPIRING_SOON, EXPIRED, CLAIMED, SETTLING, SETTLED, CANCELLED và quyền thao tác tương ứng.",
+      "source": "BRD-CCM-GUARANTEE V1.0, sơ đồ trang 2 và mục 3.2, trang 7"
+    },
+    {
+      "req_key": "BG-REQ-OW-03",
+      "title": "Hạn mức tín dụng và ký quỹ bảo lãnh",
+      "description": "Kiểm tra HĐTD Active, hạn mức bảo lãnh khả dụng, soft-hold, tỷ lệ ký quỹ, số tiền ký quỹ, tài khoản trích ký quỹ và nguồn bảo đảm.",
+      "source": "BRD-CCM-GUARANTEE V1.0, mục 3.2-3.3, trang 7-8"
+    },
+    {
+      "req_key": "BG-REQ-AM-01",
+      "title": "Tu chỉnh bảo lãnh",
+      "description": "Quản lý các loại tu chỉnh tăng, giảm, gia hạn và thay đổi nội dung; theo dõi số lần, giá trị cũ/mới, chênh lệch, ký quỹ, ngày hết hạn, phí và tệp đính kèm.",
+      "source": "BRD-CCM-GUARANTEE V1.0, mục 4.1-4.2, trang 9-10"
+    },
+    {
+      "req_key": "BG-REQ-SET-01",
+      "title": "Tất toán và liên kết thanh toán ERP",
+      "description": "Lập và xác nhận hồ sơ tất toán; kiểm soát loại tất toán, chứng từ ERP, số tiền giải phóng, hoàn trả ký quỹ, thu hồi thư gốc và văn bản giải tỏa ngân hàng.",
+      "source": "BRD-CCM-GUARANTEE V1.0, mục 5.1-5.2, trang 10-12"
+    },
+    {
+      "req_key": "BG-REQ-IN-01",
+      "title": "Quản lý bảo lãnh nhận từ đối tác",
+      "description": "Tiếp nhận, xác thực, đăng ký, quản lý trạng thái, cảnh báo, claim/thu tiền bồi thường và hoàn trả thư gốc; kiểm soát trường dữ liệu 47-62.",
+      "source": "BRD-CCM-GUARANTEE V1.0, mục 6.1-6.2, trang 12-14"
+    },
+    {
+      "req_key": "BG-REQ-GL-01",
+      "title": "Hạch toán kế toán Core ERP",
+      "description": "Phát sinh và đối chiếu các sự kiện BG_ISSUE_OUT, BG_MARGIN_LOCK, BG_FEE_EXPENSE, BG_AMEND_INC, BG_AMEND_DEC, BG_SETTLE_CLOSE và BG_MARGIN_REFUND.",
+      "source": "BRD-CCM-GUARANTEE V1.0, mục 7, trang 14"
+    },
+    {
+      "req_key": "BG-REQ-RISK-01",
+      "title": "Cảnh báo rủi ro và ngưỡng hạn mức",
+      "description": "Cảnh báo đáo hạn Outward, Inward, tạm ứng APB chưa thu hồi và mức sử dụng hạn mức 85%/95%.",
+      "source": "BRD-CCM-GUARANTEE V1.0, mục 8.1, trang 15"
+    },
+    {
+      "req_key": "BG-REQ-RPT-01",
+      "title": "Báo cáo quản trị bảo lãnh",
+      "description": "Báo cáo phát hành toàn tập đoàn, danh mục bảo lãnh nhận và đối chiếu tiền ký quỹ.",
+      "source": "BRD-CCM-GUARANTEE V1.0, mục 8.2, trang 15"
+    },
+    {
+      "req_key": "BG-REQ-INT-01",
+      "title": "Tích hợp ERP, HĐTD, BAM và ngân hàng",
+      "description": "Liên kết hợp đồng kinh tế, PO/AP/AR, hạn mức HĐTD, tiền gửi ký quỹ BAM và xác nhận từ ngân hàng.",
+      "source": "BRD-CCM-GUARANTEE V1.0, mục 1.2, 3.1, 5-7"
+    }
+  ],
+  "test_cases": [
+    {
+      "case_key": "BG-OW-001",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Tạo mới đề xuất Outward với bộ dữ liệu hợp lệ",
+      "test_type": "Positive",
+      "priority": "Critical",
+      "preconditions": "Người dùng có quyền tạo bảo lãnh; có pháp nhân, hợp đồng ERP, ngân hàng và danh mục liên quan.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Mở CCM > Quản lý bảo lãnh > Tạo mới; nhập/chọn đầy đủ pháp nhân, loại bảo lãnh, bên thụ hưởng, hợp đồng, giá trị, tiền tệ, ngân hàng, nguồn bảo đảm, tỷ lệ ký quỹ, ngày hiệu lực/ngày hết hạn; lưu nháp."
+        }
+      ],
+      "expected_result": "Đề xuất được tạo ở trạng thái DRAFT; mã quản lý được sinh; dữ liệu lưu đúng và mở lại không bị mất.",
+      "source_ref": "Mục 3.3, trường 1-22, trang 8"
+    },
+    {
+      "case_key": "BG-OW-002",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Kiểm tra bắt buộc các trường dữ liệu Outward",
+      "test_type": "Negative",
+      "priority": "High",
+      "preconditions": "Đang ở form tạo mới Outward.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Lần lượt bỏ trống từng trường được đánh dấu bắt buộc (Applicant, BG type, Beneficiary, Economic Contract, Guarantee Amount, Currency, Issuing Bank, Security Source, Effective Date, Expiry Date và Attachment ở bước tương ứng); thực hiện lưu/trình duyệt."
+        }
+      ],
+      "expected_result": "Hệ thống chỉ rõ trường thiếu; không lưu/trình duyệt khi thiếu dữ liệu bắt buộc; không tạo bản ghi không hợp lệ.",
+      "source_ref": "Mục 3.3, trang 8"
+    },
+    {
+      "case_key": "BG-OW-003",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Sinh mã bảo lãnh tự động và duy nhất",
+      "test_type": "Positive",
+      "priority": "High",
+      "preconditions": "Có quyền tạo nhiều đề xuất Outward.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tạo liên tiếp ít nhất hai đề xuất cùng ngày và cùng loại bảo lãnh; quan sát bg_code."
+        }
+      ],
+      "expected_result": "Mã theo cấu trúc BG-[Loại]-[YYYYMMDD]-[nn]; các mã không trùng nhau trên toàn hệ thống.",
+      "source_ref": "Mục 3.3, trường 1, trang 8"
+    },
+    {
+      "case_key": "BG-OW-004",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Lọc pháp nhân yêu cầu theo quyền người dùng",
+      "test_type": "Authorization",
+      "priority": "High",
+      "preconditions": "Có ít nhất hai pháp nhân; tài khoản test chỉ được phân quyền một pháp nhân.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Mở dropdown Pháp nhân yêu cầu bằng tài khoản test; thử tìm/chọn pháp nhân ngoài phạm vi được cấp."
+        }
+      ],
+      "expected_result": "Chỉ hiển thị/chấp nhận pháp nhân trong phạm vi quyền; không thể lưu bằng cách sửa payload/UI để tham chiếu pháp nhân trái quyền.",
+      "source_ref": "Mục 3.3, trường 3, trang 8"
+    },
+    {
+      "case_key": "BG-OW-005",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Kiểm tra danh mục loại hình bảo lãnh Outward",
+      "test_type": "Positive",
+      "priority": "High",
+      "preconditions": "Master Data đã cấu hình loại bảo lãnh.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Mở dropdown Loại hình bảo lãnh; kiểm tra các mã BB, PB, APB, WB, PAY và chọn lần lượt từng loại."
+        }
+      ],
+      "expected_result": "Dropdown hiển thị đúng các mã/tên loại hình; lưu đúng mã DB tương ứng; không hiển thị loại Inward trong lựa chọn Outward.",
+      "source_ref": "Mục 2.1 và 3.3, trang 1-2, 8"
+    },
+    {
+      "case_key": "BG-OW-006",
+      "req_key": "BG-REQ-INT-01",
+      "title": "Tra cứu bên thụ hưởng từ Vendor/Customer Master ERP",
+      "test_type": "Integration",
+      "priority": "High",
+      "preconditions": "Có đối tác đã đồng bộ từ ERP.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tìm kiếm một bên thụ hưởng đã có trong master; chọn đối tác; thử nhập mã đối tác không tồn tại."
+        }
+      ],
+      "expected_result": "Thông tin đối tác được lấy từ nguồn master; bản ghi không hợp lệ không được chấp nhận; lưu đúng đối tác liên kết.",
+      "source_ref": "Mục 3.3, trường 5, trang 8"
+    },
+    {
+      "case_key": "BG-OW-007",
+      "req_key": "BG-REQ-INT-01",
+      "title": "Kế thừa số và giá trị hợp đồng kinh tế từ ERP",
+      "test_type": "Integration",
+      "priority": "Critical",
+      "preconditions": "Có hợp đồng bán hàng/dự án đã đồng bộ; có giá trị hợp đồng xác định.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Chọn hợp đồng kinh tế từ ERP; đối chiếu số hợp đồng và giá trị hiển thị với bản ghi nguồn."
+        }
+      ],
+      "expected_result": "Số hợp đồng được liên kết đúng; contract_amount tự động kế thừa chính xác từ ERP; không tự ý thay đổi giá trị nguồn.",
+      "source_ref": "Mục 3.3, trường 6-7, trang 8"
+    },
+    {
+      "case_key": "BG-OW-008",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Từ chối số tiền bảo lãnh bằng 0 hoặc âm",
+      "test_type": "Negative",
+      "priority": "Critical",
+      "preconditions": "Đang tạo Outward.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Nhập Guarantee Amount lần lượt bằng 0, số âm, để trống và một giá trị dương hợp lệ."
+        }
+      ],
+      "expected_result": "Chỉ giá trị lớn hơn 0 được chấp nhận; thông báo validation rõ ràng.",
+      "source_ref": "Mục 3.3, trường 8, trang 8"
+    },
+    {
+      "case_key": "BG-OW-009",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Kiểm tra tỷ lệ bảo lãnh so với giá trị hợp đồng",
+      "test_type": "Boundary",
+      "priority": "High",
+      "preconditions": "Có loại PB và hợp đồng mẫu; BRD nêu ví dụ PB = 5-10% giá trị hợp đồng.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Nhập tỷ lệ/giá trị bảo lãnh thấp hơn, trong và cao hơn khoảng ví dụ; lưu hoặc trình duyệt."
+        }
+      ],
+      "expected_result": "Hệ thống áp dụng đúng quy tắc tỷ lệ được cấu hình theo loại bảo lãnh; cần xác nhận 5-10% là cấu hình cứng hay chỉ ví dụ BRD trước khi chốt expected chi tiết.",
+      "source_ref": "Mục 3.3, trường 8, trang 8"
+    },
+    {
+      "case_key": "BG-OW-010",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Kiểm tra danh mục tiền tệ",
+      "test_type": "Positive",
+      "priority": "Medium",
+      "preconditions": "Danh mục MD_TienTe_TyGia có VND, USD, EUR.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Mở dropdown tiền tệ và chọn VND/USD/EUR; lưu đề xuất."
+        }
+      ],
+      "expected_result": "Chỉ nhận mã tiền tệ hợp lệ từ master; lưu đúng mã ba ký tự.",
+      "source_ref": "Mục 3.3, trường 9, trang 8"
+    },
+    {
+      "case_key": "BG-OW-011",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Kiểm tra ngân hàng phát hành bắt buộc và chi nhánh tùy chọn",
+      "test_type": "Positive",
+      "priority": "High",
+      "preconditions": "Danh mục MD_NganHang có ngân hàng và chi nhánh.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Bỏ trống ngân hàng để lưu; sau đó chọn ngân hàng nhưng bỏ trống chi nhánh; cuối cùng chọn cả hai."
+        }
+      ],
+      "expected_result": "Không cho lưu khi thiếu ngân hàng; cho phép bỏ trống chi nhánh; nếu chọn chi nhánh thì phải thuộc ngân hàng đã chọn.",
+      "source_ref": "Mục 3.3, trường 10-11, trang 8"
+    },
+    {
+      "case_key": "BG-OW-012",
+      "req_key": "BG-REQ-OW-03",
+      "title": "Kiểm tra ba nguồn bảo đảm phát hành",
+      "test_type": "Positive",
+      "priority": "Critical",
+      "preconditions": "Có phương án hạn mức HĐTD, ký quỹ 100% và kết hợp.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tạo ba đề xuất theo từng Security Source: HĐTD, ký quỹ 100%, kết hợp hạn mức + ký quỹ."
+        }
+      ],
+      "expected_result": "Hệ thống hiển thị đúng trường cần nhập theo từng phương án; không yêu cầu HĐTD ở phương án không sử dụng hạn mức; số ký quỹ tính theo cấu hình.",
+      "source_ref": "Mục 3.3, trường 12-16, trang 8"
+    },
+    {
+      "case_key": "BG-OW-013",
+      "req_key": "BG-REQ-OW-03",
+      "title": "Chỉ cho chọn HĐTD Active còn hạn mức bảo lãnh",
+      "test_type": "Negative",
+      "priority": "Critical",
+      "preconditions": "Có HĐTD Active còn hạn mức, HĐTD hết hiệu lực và HĐTD hết hạn mức.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Thử chọn từng hợp đồng tín dụng trong trường Credit Contract; trình duyệt đề xuất với HĐTD không đủ điều kiện."
+        }
+      ],
+      "expected_result": "Chỉ HĐTD Active và còn hạn mức bảo lãnh mới được chấp nhận khi nguồn bảo đảm sử dụng HĐTD.",
+      "source_ref": "Mục 3.3, trường 13, trang 8"
+    },
+    {
+      "case_key": "BG-OW-014",
+      "req_key": "BG-REQ-OW-03",
+      "title": "Kiểm tra biên tỷ lệ ký quỹ 0%-100%",
+      "test_type": "Boundary",
+      "priority": "High",
+      "preconditions": "Đang tạo đề xuất có nguồn bảo đảm cần ký quỹ.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Nhập margin_deposit_pct lần lượt -0.01, 0, 10, 100 và 100.01."
+        }
+      ],
+      "expected_result": "Chấp nhận trong khoảng 0 đến 100; từ chối ngoài khoảng; xử lý chính xác số thập phân theo precision của trường.",
+      "source_ref": "Mục 3.3, trường 14, trang 8"
+    },
+    {
+      "case_key": "BG-OW-015",
+      "req_key": "BG-REQ-OW-03",
+      "title": "Tự động tính số tiền ký quỹ",
+      "test_type": "Calculation",
+      "priority": "Critical",
+      "preconditions": "Có guarantee_amount và margin_deposit_pct.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Nhập Guarantee Amount = 5.000.000.000 VND và tỷ lệ ký quỹ = 10%; đối chiếu trường Margin Amount."
+        }
+      ],
+      "expected_result": "margin_amount = guarantee_amount × margin_deposit_pct; kết quả là 500.000.000 VND, định dạng và làm tròn đúng quy định.",
+      "source_ref": "Mục 3.3, trường 15, trang 8"
+    },
+    {
+      "case_key": "BG-OW-016",
+      "req_key": "BG-REQ-OW-03",
+      "title": "Bắt buộc tài khoản trích ký quỹ khi số tiền ký quỹ lớn hơn 0",
+      "test_type": "Negative",
+      "priority": "High",
+      "preconditions": "margin_amount > 0 và có tài khoản thanh toán trong MD_TaiKhoan.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Để trống Margin Account và lưu; sau đó chọn tài khoản hợp lệ rồi lưu."
+        }
+      ],
+      "expected_result": "Bắt buộc chọn tài khoản khi margin_amount > 0; cho phép không chọn khi margin_amount = 0 theo điều kiện mô tả.",
+      "source_ref": "Mục 3.3, trường 16, trang 8"
+    },
+    {
+      "case_key": "BG-OW-017",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Kiểm tra ngày hết hạn phải sau ngày hiệu lực",
+      "test_type": "Boundary",
+      "priority": "Critical",
+      "preconditions": "Đang tạo đề xuất Outward.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Nhập expiry_date bằng effective_date, nhỏ hơn effective_date và lớn hơn effective_date."
+        }
+      ],
+      "expected_result": "Từ chối ngày hết hạn bằng/nhỏ hơn ngày hiệu lực; chấp nhận ngày lớn hơn; hiển thị lỗi tại trường liên quan.",
+      "source_ref": "Mục 3.3, trường 17-18, trang 8"
+    },
+    {
+      "case_key": "BG-OW-018",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Kiểm tra Auto-renew và phí phát hành",
+      "test_type": "Positive",
+      "priority": "Medium",
+      "preconditions": "Đang tạo đề xuất; có cấu hình phí nếu áp dụng.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Chuyển Auto-renew True/False; nhập issuance_fee_pct và issuance_fee_amount; lưu và mở lại."
+        }
+      ],
+      "expected_result": "Lưu đúng boolean; trường phí tùy chọn không bị bắt buộc ngoài đặc tả; giá trị phí được bảo toàn.",
+      "source_ref": "Mục 3.3, trường 19-21, trang 8"
+    },
+    {
+      "case_key": "BG-OW-019",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Bắt buộc scan thư bảo lãnh phát hành trước khi kích hoạt",
+      "test_type": "Negative",
+      "priority": "Critical",
+      "preconditions": "Đề xuất đã qua phê duyệt và đến bước cập nhật kết quả phát hành.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Thử kích hoạt khi không có bản scan thư bảo lãnh; sau đó tải bản scan đầy đủ và thử lại."
+        }
+      ],
+      "expected_result": "Không kích hoạt khi thiếu attachment bắt buộc; nhận file hợp lệ và liên kết đúng hồ sơ bảo lãnh.",
+      "source_ref": "Mục 3.3, trường 22; CCM13.7, trang 4, 8"
+    },
+    {
+      "case_key": "BG-OW-020",
+      "req_key": "BG-REQ-OW-01",
+      "title": "Xuất đề nghị phát hành theo mẫu ngân hàng dạng DOC",
+      "test_type": "Positive",
+      "priority": "High",
+      "preconditions": "Có ngân hàng đã cấu hình mẫu biểu; đề xuất đủ thông tin.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Chọn ngân hàng phát hành; thực hiện chức năng xuất file đề nghị."
+        }
+      ],
+      "expected_result": "Sinh file .doc theo đúng mẫu ngân hàng đã chọn; các trường và dữ liệu trên file khớp hồ sơ trên hệ thống.",
+      "source_ref": "CCM13.4, trang 4"
+    },
+    {
+      "case_key": "BG-OW-021",
+      "req_key": "BG-REQ-OW-02",
+      "title": "DRAFT không ghi nhận ngoại bảng và cho phép sửa/xóa",
+      "test_type": "State Transition",
+      "priority": "Critical",
+      "preconditions": "Có đề xuất ở trạng thái DRAFT.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Kiểm tra thông tin hạn mức, GL và thao tác sửa/xóa ở DRAFT."
+        }
+      ],
+      "expected_result": "Chưa trừ hạn mức HĐTD, chưa ghi nhận ngoại bảng; cho phép sửa/xóa; không hiển thị tab hạn mức theo mô tả trạng thái.",
+      "source_ref": "Mục 3.2, trang 7"
+    },
+    {
+      "case_key": "BG-OW-022",
+      "req_key": "BG-REQ-OW-02",
+      "title": "Trình DRAFT sang REVIEW và kiểm tra hợp lệ/hạn mức",
+      "test_type": "State Transition",
+      "priority": "Critical",
+      "preconditions": "Có DRAFT đủ trường và một DRAFT thiếu trường; có dữ liệu hạn mức.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Trình duyệt từng hồ sơ; theo dõi trạng thái và thay đổi hạn mức khả dụng."
+        }
+      ],
+      "expected_result": "Hồ sơ hợp lệ chuyển sang REVIEW để kế toán kiểm tra; hồ sơ thiếu điều kiện không được chuyển; áp dụng cơ chế block hạn mức tạm thời như mô tả.",
+      "source_ref": "Mục 3.2 và sơ đồ trang 2, trang 7"
+    },
+    {
+      "case_key": "BG-OW-023",
+      "req_key": "BG-REQ-OW-03",
+      "title": "Đối chiếu công thức hạn mức bảo lãnh còn lại",
+      "test_type": "Calculation",
+      "priority": "Critical",
+      "preconditions": "Có số liệu hạn mức HĐTD, dư nợ vay, bảo lãnh, LC và hạn mức bảo lãnh riêng.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tạo dữ liệu test có hai biểu thức giới hạn khác nhau; đối chiếu số dư hệ thống với công thức ghi trong BRD."
+        }
+      ],
+      "expected_result": "Kết quả phải tuân thủ công thức đã được chủ nghiệp vụ xác nhận. BRD hiện ghi Max giữa hai biểu thức; cần làm rõ cách dùng Max/Min trước khi kết luận Pass/Fail.",
+      "source_ref": "Mục 3.2, trang 7"
+    },
+    {
+      "case_key": "BG-OW-024",
+      "req_key": "BG-REQ-OW-02",
+      "title": "PENDING_APPROVAL giữ hạn mức dự kiến và khóa chỉnh sửa",
+      "test_type": "State Transition",
+      "priority": "Critical",
+      "preconditions": "Hồ sơ REVIEW đã được trình cấp phê duyệt.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Chuyển hồ sơ sang PENDING_APPROVAL; thử sửa trường dữ liệu và kiểm tra số dư hạn mức."
+        }
+      ],
+      "expected_result": "Soft-hold hạn mức bảo lãnh dự kiến trên HĐTD; khóa chỉnh sửa dữ liệu theo trạng thái.",
+      "source_ref": "Mục 3.2, trang 7"
+    },
+    {
+      "case_key": "BG-OW-025",
+      "req_key": "BG-REQ-OW-02",
+      "title": "REJECTED mở lại trường cho kế toán chỉnh sửa",
+      "test_type": "State Transition",
+      "priority": "High",
+      "preconditions": "Có hồ sơ đang chờ phê duyệt.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Thực hiện từ chối; đăng nhập vai trò kế toán và mở lại hồ sơ."
+        }
+      ],
+      "expected_result": "Trạng thái REJECTED; các trường cần chỉnh sửa được enable; có thể chỉnh sửa và trình lại theo quy trình được cấu hình.",
+      "source_ref": "Mục 3.2, trang 7"
+    },
+    {
+      "case_key": "BG-OW-026",
+      "req_key": "BG-REQ-OW-02",
+      "title": "APPROVED khóa thông tin và cho phép xuất đề nghị",
+      "test_type": "State Transition",
+      "priority": "High",
+      "preconditions": "Có hồ sơ được cấp thẩm quyền phê duyệt.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Phê duyệt hồ sơ; thử sửa trường dữ liệu; thực hiện xuất file đề nghị ngân hàng."
+        }
+      ],
+      "expected_result": "Thông tin bị khóa; chức năng xuất file đề nghị được bật; dữ liệu xuất khớp hồ sơ đã phê duyệt.",
+      "source_ref": "Mục 3.2, trang 7"
+    },
+    {
+      "case_key": "BG-OW-027",
+      "req_key": "BG-REQ-OW-02",
+      "title": "Theo dõi trạng thái Awaiting Release",
+      "test_type": "State Transition",
+      "priority": "Medium",
+      "preconditions": "Ngân hàng đã tiếp nhận hồ sơ nhưng chưa phát hành thư.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Cập nhật tình trạng ngân hàng đã nhận và xử lý; quan sát trạng thái hồ sơ."
+        }
+      ],
+      "expected_result": "Hồ sơ thể hiện trạng thái Awaiting Release đúng với mô tả; chưa được coi là ACTIVE trước khi có thư chính thức.",
+      "source_ref": "Mục 3.2, trang 7"
+    },
+    {
+      "case_key": "BG-OW-028",
+      "req_key": "BG-REQ-OW-02",
+      "title": "Kích hoạt ACTIVE sau khi cập nhật thư phát hành",
+      "test_type": "State Transition",
+      "priority": "Critical",
+      "preconditions": "Có bản phát hành chính thức từ ngân hàng và bản scan thư.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Cập nhật số thư, số tiền, ngày phát hành/hiệu lực, ngày hết hạn, tiền ký quỹ; tải bản scan; kích hoạt."
+        }
+      ],
+      "expected_result": "Trạng thái ACTIVE; theo dõi hiệu lực; kích hoạt hạch toán ngoại bảng và trừ lùi hạn mức theo đặc tả.",
+      "source_ref": "CCM13.7 và mục 3.2, trang 4, 7"
+    },
+    {
+      "case_key": "BG-OW-029",
+      "req_key": "BG-REQ-OW-02",
+      "title": "Không cho sửa trường đã khóa sau phê duyệt",
+      "test_type": "Authorization",
+      "priority": "High",
+      "preconditions": "Hồ sơ ở APPROVED hoặc ACTIVE; có tài khoản kế toán thường và tài khoản có thẩm quyền.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Thử sửa các trường quan trọng bằng UI và bằng thao tác gửi lại form; đối chiếu lịch sử thay đổi."
+        }
+      ],
+      "expected_result": "Không cho sửa trái quyền hoặc vượt trạng thái; mọi thay đổi hợp lệ phải theo luồng tu chỉnh.",
+      "source_ref": "Mục 3.2, trang 7; mục 4, trang 9-10"
+    },
+    {
+      "case_key": "BG-AM-001",
+      "req_key": "BG-REQ-AM-01",
+      "title": "Chỉ tu chỉnh bảo lãnh gốc đang ACTIVE",
+      "test_type": "Negative",
+      "priority": "Critical",
+      "preconditions": "Có một bảo lãnh ACTIVE và một bảo lãnh DRAFT/EXPIRED/SETTLED.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Mở chức năng tạo tu chỉnh; tìm/chọn lần lượt các bảo lãnh ở từng trạng thái."
+        }
+      ],
+      "expected_result": "Chỉ bảo lãnh gốc ACTIVE được chọn làm parent theo đặc tả; trạng thái khác bị loại hoặc từ chối.",
+      "source_ref": "Mục 4.2, trường 24, trang 9"
+    },
+    {
+      "case_key": "BG-AM-002",
+      "req_key": "BG-REQ-AM-01",
+      "title": "Tự tăng số lần tu chỉnh theo thư bảo lãnh gốc",
+      "test_type": "Positive",
+      "priority": "High",
+      "preconditions": "Có bảo lãnh ACTIVE chưa tu chỉnh và bảo lãnh đã có một số lần tu chỉnh.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tạo liên tiếp hai hồ sơ amendment cho cùng bảo lãnh gốc; kiểm tra amendment_no."
+        }
+      ],
+      "expected_result": "Số lần tu chỉnh tự tăng 1, 2, 3... theo từng thư gốc; không trùng và không phụ thuộc người nhập.",
+      "source_ref": "Mục 4.2, trường 23, trang 9"
+    },
+    {
+      "case_key": "BG-AM-003",
+      "req_key": "BG-REQ-AM-01",
+      "title": "Kiểm tra bắt buộc số tham chiếu ngân hàng, ngày, loại và lý do tu chỉnh",
+      "test_type": "Negative",
+      "priority": "High",
+      "preconditions": "Đang tạo Amendment.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Bỏ trống amendment_bank_ref, amendment_date, amendment_type, amendment_reason từng trường; thử xác nhận."
+        }
+      ],
+      "expected_result": "Chặn xác nhận khi thiếu trường bắt buộc; chỉ lưu/trình khi đủ thông tin theo BRD.",
+      "source_ref": "Mục 4.2, trường 25-27, 34, trang 9-10"
+    },
+    {
+      "case_key": "BG-AM-004",
+      "req_key": "BG-REQ-AM-01",
+      "title": "Tu chỉnh tăng giá trị bảo lãnh",
+      "test_type": "Calculation",
+      "priority": "Critical",
+      "preconditions": "Bảo lãnh ACTIVE; hợp đồng có phụ lục tăng; HĐTD còn hạn mức hoặc có thể ký quỹ bổ sung.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Chọn loại Tăng giá trị; nhập delta_amount dương; kiểm tra old_guarantee_amount, new_guarantee_amount, delta_margin_amount; trình duyệt."
+        }
+      ],
+      "expected_result": "Giá trị cũ kế thừa; new = old + delta; số tiền mới > 0; kiểm tra hạn mức hoặc yêu cầu ký quỹ bổ sung đúng quy tắc.",
+      "source_ref": "Mục 4.1 và 4.2, trường 28-31, trang 9-10"
+    },
+    {
+      "case_key": "BG-AM-005",
+      "req_key": "BG-REQ-AM-01",
+      "title": "Tu chỉnh giảm giá trị bảo lãnh",
+      "test_type": "Calculation",
+      "priority": "Critical",
+      "preconditions": "Bảo lãnh ACTIVE; có biên bản hoàn thành một phần nghĩa vụ.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Chọn Giảm giá trị; nhập delta_amount âm; kiểm tra giá trị mới và phần ký quỹ được giải tỏa."
+        }
+      ],
+      "expected_result": "new_guarantee_amount = old + delta; giá trị mới > 0; giải phóng hạn mức/ký quỹ tương ứng sau phê duyệt.",
+      "source_ref": "Mục 4.1 và 4.2, trường 28-31, trang 9-10"
+    },
+    {
+      "case_key": "BG-AM-006",
+      "req_key": "BG-REQ-AM-01",
+      "title": "Từ chối tu chỉnh làm giá trị bảo lãnh mới bằng hoặc nhỏ hơn 0",
+      "test_type": "Boundary",
+      "priority": "Critical",
+      "preconditions": "Bảo lãnh ACTIVE có giá trị xác định.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Nhập delta_amount khiến new_guarantee_amount bằng 0 và nhỏ hơn 0; thử lưu/xác nhận."
+        }
+      ],
+      "expected_result": "Từ chối; không phát sinh tu chỉnh có giá trị mới không hợp lệ.",
+      "source_ref": "Mục 4.2, trường 30, trang 10"
+    },
+    {
+      "case_key": "BG-AM-007",
+      "req_key": "BG-REQ-AM-01",
+      "title": "Gia hạn phải có ngày hết hạn mới lớn hơn ngày cũ",
+      "test_type": "Boundary",
+      "priority": "High",
+      "preconditions": "Bảo lãnh ACTIVE có old_expiry_date.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Chọn Gia hạn; nhập new_expiry_date bằng hoặc trước old_expiry_date, sau đó nhập ngày lớn hơn."
+        }
+      ],
+      "expected_result": "Chỉ chấp nhận ngày mới lớn hơn ngày hết hạn cũ; ngày cũ được kế thừa và không bị ghi đè trước khi tu chỉnh được chấp nhận.",
+      "source_ref": "Mục 4.2, trường 32-33, trang 10"
+    },
+    {
+      "case_key": "BG-AM-008",
+      "req_key": "BG-REQ-AM-01",
+      "title": "Bắt buộc văn bản tu chỉnh scan và kiểm tra phí tu chỉnh",
+      "test_type": "Negative",
+      "priority": "High",
+      "preconditions": "Đang tạo Amendment.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Không tải amendment_attachment rồi xác nhận; sau đó tải file scan; nhập amendment_fee tùy chọn."
+        }
+      ],
+      "expected_result": "Không xác nhận khi thiếu attachment bắt buộc; phí tùy chọn lưu chính xác; file liên kết với đúng amendment.",
+      "source_ref": "Mục 4.2, trường 35-36, trang 10"
+    },
+    {
+      "case_key": "BG-AM-009",
+      "req_key": "BG-REQ-AM-01",
+      "title": "Tu chỉnh được duyệt cập nhật ngoại bảng và ký quỹ",
+      "test_type": "Integration",
+      "priority": "Critical",
+      "preconditions": "Có amendment tăng/giảm được duyệt; dữ liệu GL và ký quỹ test sẵn.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Phê duyệt amendment tăng và amendment giảm; kiểm tra giá trị cam kết ngoại bảng 007, margin bổ sung/giải tỏa và số dư hạn mức."
+        }
+      ],
+      "expected_result": "Tăng giá trị ghi tăng phần chênh lệch; giảm giá trị ghi giảm phần chênh lệch; ký quỹ được tính bổ sung/giải tỏa tương ứng.",
+      "source_ref": "Mục 3.2 và 7, trang 7, 14"
+    },
+    {
+      "case_key": "BG-ST-001",
+      "req_key": "BG-REQ-SET-01",
+      "title": "Chỉ tất toán bảo lãnh đang ACTIVE",
+      "test_type": "Negative",
+      "priority": "Critical",
+      "preconditions": "Có bảo lãnh ACTIVE và bảo lãnh ở DRAFT/EXPIRED/SETTLED.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Mở tạo hồ sơ tất toán và tìm từng bảo lãnh."
+        }
+      ],
+      "expected_result": "Chỉ chọn bảo lãnh ACTIVE theo điều kiện mô tả; bản ghi không hợp lệ không được tất toán lặp.",
+      "source_ref": "Mục 5.2, trường 38, trang 11"
+    },
+    {
+      "case_key": "BG-ST-002",
+      "req_key": "BG-REQ-SET-01",
+      "title": "Sinh số chứng từ tất toán tự động",
+      "test_type": "Positive",
+      "priority": "Medium",
+      "preconditions": "Có quyền tạo settlement.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tạo nhiều hồ sơ tất toán cùng ngày; quan sát settlement_voucher_no."
+        }
+      ],
+      "expected_result": "Mã tự sinh theo SETTLE-BG-[YYYYMMDD]-[nn], không trùng.",
+      "source_ref": "Mục 5.2, trường 37, trang 11"
+    },
+    {
+      "case_key": "BG-ST-003",
+      "req_key": "BG-REQ-SET-01",
+      "title": "Kiểm tra loại tất toán và ngày tất toán",
+      "test_type": "Negative",
+      "priority": "High",
+      "preconditions": "Đang tạo Settlement.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Kiểm tra đủ bốn loại: hết hạn tự nhiên, thu hồi thư gốc trước hạn, hoàn thành hợp đồng, thay thế bằng bảo lãnh khác; bỏ trống settlement_type/settlement_date."
+        }
+      ],
+      "expected_result": "Bốn lựa chọn đúng theo BRD; hai trường bắt buộc không được bỏ trống.",
+      "source_ref": "Mục 5.2, trường 39-40, trang 11"
+    },
+    {
+      "case_key": "BG-ST-004",
+      "req_key": "BG-REQ-SET-01",
+      "title": "Kiểm tra liên kết chứng từ thanh toán ERP theo điều kiện",
+      "test_type": "Integration",
+      "priority": "High",
+      "preconditions": "Có phiếu chi/UNC ERP và hồ sơ nghĩa vụ liên quan.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tất toán với settlement_type có chứng từ ERP; bỏ trống voucher rồi nhập mã hợp lệ; kiểm tra liên kết."
+        }
+      ],
+      "expected_result": "erp_payment_voucher_id được yêu cầu theo điều kiện nghiệp vụ; mã phải tham chiếu được chứng từ ERP liên quan.",
+      "source_ref": "Mục 5.2, trường 41, trang 11"
+    },
+    {
+      "case_key": "BG-ST-005",
+      "req_key": "BG-REQ-SET-01",
+      "title": "Tự xác định số tiền bảo lãnh và ký quỹ được giải phóng",
+      "test_type": "Calculation",
+      "priority": "Critical",
+      "preconditions": "Bảo lãnh ACTIVE có guarantee_amount và margin_amount đã đối chiếu.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Lập Settlement; so sánh released_bg_amount và released_margin_amount với giá trị hiệu lực còn lại và số dư ký quỹ đang phong tỏa."
+        }
+      ],
+      "expected_result": "Hai trường tự động phản ánh số được đóng/giải tỏa; không vượt quá số dư cam kết và ký quỹ hiện tại.",
+      "source_ref": "Mục 5.2, trường 42-43, trang 11"
+    },
+    {
+      "case_key": "BG-ST-006",
+      "req_key": "BG-REQ-SET-01",
+      "title": "Kiểm tra tài khoản nhận tiền ký quỹ hoàn trả",
+      "test_type": "Negative",
+      "priority": "High",
+      "preconditions": "Có số tiền ký quỹ cần hoàn trả và MD_TaiKhoan.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Để trống refund_account_id rồi xác nhận; chọn tài khoản thanh toán hợp lệ và xác nhận lại."
+        }
+      ],
+      "expected_result": "Khi có khoản hoàn trả, bắt buộc có tài khoản nhận hợp lệ; không hoàn trả nhầm pháp nhân/tài khoản.",
+      "source_ref": "Mục 5.2, trường 44, trang 11"
+    },
+    {
+      "case_key": "BG-ST-007",
+      "req_key": "BG-REQ-SET-01",
+      "title": "Bắt buộc tình trạng thu hồi thư gốc và văn bản giải tỏa ngân hàng",
+      "test_type": "Negative",
+      "priority": "Critical",
+      "preconditions": "Đang tất toán Outward.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Để original_doc_returned chưa xác nhận và bank_discharge_letter thiếu; thử hoàn tất; sau đó cung cấp đủ."
+        }
+      ],
+      "expected_result": "Không xác nhận tất toán thành công khi thiếu các bằng chứng bắt buộc; lưu đúng file giải tỏa ngân hàng.",
+      "source_ref": "Mục 5.2, trường 45-46, trang 11-12"
+    },
+    {
+      "case_key": "BG-ST-008",
+      "req_key": "BG-REQ-SET-01",
+      "title": "Tất toán APB theo từng đợt nghiệm thu và thanh toán",
+      "test_type": "Integration",
+      "priority": "Critical",
+      "preconditions": "Bảo lãnh loại APB; có nhiều đợt nghiệm thu, hóa đơn và bù trừ công nợ tạm ứng ERP.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Gửi/đồng bộ từng sự kiện nghiệm thu và thanh toán; theo dõi giá trị bảo lãnh tạm ứng còn lại sau mỗi đợt."
+        }
+      ],
+      "expected_result": "Mỗi đợt làm giảm bảo lãnh theo tỷ lệ tạm ứng tương ứng; không giảm trùng sự kiện. Công thức tỷ lệ/rounding cần được chủ nghiệp vụ xác nhận.",
+      "source_ref": "Mục 5.1, trang 10"
+    },
+    {
+      "case_key": "BG-ST-009",
+      "req_key": "BG-REQ-SET-01",
+      "title": "Kiểm tra sự kiện ERP cho tất toán PB, WB, PAY và BB",
+      "test_type": "Integration",
+      "priority": "Critical",
+      "preconditions": "Có hợp đồng/phiếu thanh toán và sự kiện hoàn thành phù hợp cho từng loại bảo lãnh.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tạo sự kiện PB: thanh toán cuối + FAC/PAC; WB: hết thời gian bảo hành, thanh toán retainage và không tranh chấp; PAY: AP balance = 0; BB: có kết quả trúng/trượt hoặc PB thay thế."
+        }
+      ],
+      "expected_result": "Chỉ đúng sự kiện được mô tả mới kích hoạt đề xuất tất toán/giảm trừ; sự kiện không đủ điều kiện không đóng bảo lãnh.",
+      "source_ref": "Mục 5.1, trang 10-11"
+    },
+    {
+      "case_key": "BG-ST-010",
+      "req_key": "BG-REQ-SET-01",
+      "title": "SETTLING khóa giao dịch phát sinh và SETTLED đóng nghĩa vụ",
+      "test_type": "State Transition",
+      "priority": "Critical",
+      "preconditions": "Có bảo lãnh ACTIVE và đủ chứng từ tất toán.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Trình tất toán; kiểm tra giao dịch mới trên bảo lãnh; sau xác nhận giải tỏa từ ngân hàng chuyển sang SETTLED."
+        }
+      ],
+      "expected_result": "SETTLING khóa giao dịch phát sinh; SETTLED ghi nhận giải trừ, hoàn trả hạn mức HĐTD và giải tỏa tiền ký quỹ theo trạng thái.",
+      "source_ref": "Mục 3.2, trang 7"
+    },
+    {
+      "case_key": "BG-ST-011",
+      "req_key": "BG-REQ-SET-01",
+      "title": "Không ghi nhận đóng ngoại bảng khi tất toán thất bại/chưa được xác nhận",
+      "test_type": "Negative",
+      "priority": "Critical",
+      "preconditions": "Có hồ sơ settlement đang chờ ngân hàng.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Thử kết thúc settlement khi thiếu xác nhận ngân hàng hoặc khi thao tác bị lỗi; kiểm tra số dư GL 007 và hạn mức."
+        }
+      ],
+      "expected_result": "Không ghi nhận BG_SETTLE_CLOSE và không giải phóng hạn mức/ký quỹ trước khi điều kiện tất toán thành công.",
+      "source_ref": "Mục 3.2, 5.2 và 7, trang 7, 11-14"
+    },
+    {
+      "case_key": "BG-IN-001",
+      "req_key": "BG-REQ-IN-01",
+      "title": "Tạo hồ sơ Inward BG với dữ liệu hợp lệ",
+      "test_type": "Positive",
+      "priority": "Critical",
+      "preconditions": "Có pháp nhân, Vendor Master, PO/contract ERP, ngân hàng phát hành và file scan.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tạo hồ sơ bảo lãnh nhận; nhập số thư gốc, pháp nhân thụ hưởng, nhà thầu/NCC, MST, ngân hàng, loại, PO, số tiền, tiền tệ, ngày, nơi lưu bản gốc và attachment."
+        }
+      ],
+      "expected_result": "Hồ sơ được tạo và xuất hiện trong sổ theo dõi Inward BG; thông tin và file được lưu đúng.",
+      "source_ref": "Mục 6.1-6.2, trường 47-62, trang 12-14"
+    },
+    {
+      "case_key": "BG-IN-002",
+      "req_key": "BG-REQ-IN-01",
+      "title": "Sinh mã Inward BG tự động, duy nhất",
+      "test_type": "Positive",
+      "priority": "Medium",
+      "preconditions": "Có quyền tạo Inward BG.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tạo hai hồ sơ trong cùng ngày; quan sát inward_bg_code."
+        }
+      ],
+      "expected_result": "Mã theo IN-BG-[YYYYMMDD]-[nn]; không trùng.",
+      "source_ref": "Mục 6.2, trường 47, trang 13"
+    },
+    {
+      "case_key": "BG-IN-003",
+      "req_key": "BG-REQ-IN-01",
+      "title": "Kiểm tra bắt buộc dữ liệu và số tiền Inward",
+      "test_type": "Negative",
+      "priority": "Critical",
+      "preconditions": "Đang tạo Inward BG.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Bỏ trống từng trường bắt buộc; nhập inward_amount bằng 0/âm; lưu."
+        }
+      ],
+      "expected_result": "Chặn bản ghi thiếu trường bắt buộc; số tiền phải > 0; thông báo đúng trường lỗi.",
+      "source_ref": "Mục 6.2, trường 48-62, trang 13-14"
+    },
+    {
+      "case_key": "BG-IN-004",
+      "req_key": "BG-REQ-INT-01",
+      "title": "Tra cứu nhà thầu và liên kết hợp đồng/PO ERP",
+      "test_type": "Integration",
+      "priority": "High",
+      "preconditions": "Có Vendor Master và PO/Procurement Contract trên ERP.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Chọn đối tác đã đồng bộ; liên kết PO; đối chiếu mã nhà thầu, MST và số hợp đồng/PO."
+        }
+      ],
+      "expected_result": "Dữ liệu đúng nguồn Vendor Master/ERP; liên kết đúng PO; từ chối tham chiếu không tồn tại.",
+      "source_ref": "Mục 6.2, trường 50-54, trang 13"
+    },
+    {
+      "case_key": "BG-IN-005",
+      "req_key": "BG-REQ-IN-01",
+      "title": "Kiểm tra loại hình bảo lãnh nhận và điểm chưa thống nhất IN-APB",
+      "test_type": "Boundary",
+      "priority": "High",
+      "preconditions": "Danh mục Inward đã cấu hình.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Kiểm tra dropdown loại Inward theo Master Data; đối chiếu IN-PB, IN-WB và IN-APB trong field specification."
+        }
+      ],
+      "expected_result": "Các lựa chọn phải đúng danh mục đã được chủ nghiệp vụ xác nhận. BRD liệt kê IN-APB ở trường 53 nhưng Master Data 2.1 chỉ liệt kê IN-PB/IN-WB; tạm đánh dấu cần xác nhận.",
+      "source_ref": "Mục 2.1 và 6.2, trang 1-2, 13"
+    },
+    {
+      "case_key": "BG-IN-006",
+      "req_key": "BG-REQ-IN-01",
+      "title": "Xác thực thư bảo lãnh trước khi dùng làm điều kiện giải ngân/nghiệm thu",
+      "test_type": "Workflow",
+      "priority": "Critical",
+      "preconditions": "Hồ sơ Inward ở RECEIVED; có kênh liên hệ ngân hàng.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Ghi nhận nhận bản cứng; chưa xác thực; thử thao tác giải ngân tạm ứng/nghiệm thu; sau đó cập nhật xác thực bằng văn bản hoặc SWIFT MT760/MT799."
+        }
+      ],
+      "expected_result": "RECEIVED chưa được coi là AUTHENTICATED; sau xác thực hợp lệ mới đáp ứng điều kiện tiên quyết cho giải ngân/nghiệm thu theo BRD.",
+      "source_ref": "Mục 6.1-6.2, trang 12-13"
+    },
+    {
+      "case_key": "BG-IN-007",
+      "req_key": "BG-REQ-IN-01",
+      "title": "Chuyển AUTHENTICATED sang ACTIVE và theo dõi hiệu lực",
+      "test_type": "State Transition",
+      "priority": "High",
+      "preconditions": "Thư đã được xác thực hợp lệ.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Cập nhật tình trạng hiệu lực; kiểm tra trạng thái và liên kết PO/hợp đồng."
+        }
+      ],
+      "expected_result": "Hồ sơ chuyển ACTIVE và được theo dõi thời hạn bảo đảm theo tiến độ dự án.",
+      "source_ref": "Mục 6.2, trang 13"
+    },
+    {
+      "case_key": "BG-IN-008",
+      "req_key": "BG-REQ-IN-01",
+      "title": "Cảnh báo Inward khi sắp hết hạn và hợp đồng chưa nghiệm thu xong",
+      "test_type": "Risk",
+      "priority": "Critical",
+      "preconditions": "Inward BG còn 30/15 ngày đến hạn; PO/hợp đồng chưa nghiệm thu xong.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Thiết lập dữ liệu expiry_date lần lượt còn 31, 30, 15 ngày; kiểm tra cảnh báo và người nhận Phòng Mua hàng/Quản lý Nhà thầu."
+        }
+      ],
+      "expected_result": "Có cảnh báo theo ngưỡng 30 và 15 ngày khi hợp đồng chưa nghiệm thu xong; không cảnh báo nhầm khi điều kiện không thỏa.",
+      "source_ref": "Mục 6.1 và 8.1, trang 12, 15"
+    },
+    {
+      "case_key": "BG-IN-009",
+      "req_key": "BG-REQ-IN-01",
+      "title": "Claim Inward chặn các đợt giải ngân tiếp theo",
+      "test_type": "Workflow",
+      "priority": "Critical",
+      "preconditions": "Nhà thầu vi phạm nghĩa vụ; Inward BG đang ACTIVE.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Ghi nhận văn bản Claim/Demand; kiểm tra INVOKED_CLAIM; thử tạo thanh toán/giải ngân tiếp cho NCC."
+        }
+      ],
+      "expected_result": "Chuyển trạng thái yêu cầu bồi thường; theo dõi khoản phải thu bồi thường; chặn các đợt giải ngân tiếp theo trên ERP.",
+      "source_ref": "Mục 6.2, trang 13"
+    },
+    {
+      "case_key": "BG-IN-010",
+      "req_key": "BG-REQ-IN-01",
+      "title": "Ghi nhận thu tiền bồi thường và hạch toán giảm công nợ NCC",
+      "test_type": "Integration",
+      "priority": "High",
+      "preconditions": "Có Claim đã được ngân hàng thanh toán bồi thường.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Ghi nhận tiền bồi thường vào tài khoản doanh nghiệp; kiểm tra trạng thái CLAIM_COLLECTED và bút toán/đối trừ ERP."
+        }
+      ],
+      "expected_result": "Ghi nhận đã thu tiền; số tiền liên kết đúng hồ sơ; giảm trừ công nợ phải trả nhà thầu theo cấu hình.",
+      "source_ref": "Mục 6.2, trang 13"
+    },
+    {
+      "case_key": "BG-IN-011",
+      "req_key": "BG-REQ-IN-01",
+      "title": "Hoàn trả bản gốc và đóng hồ sơ Inward",
+      "test_type": "Workflow",
+      "priority": "High",
+      "preconditions": "Nhà thầu đã hoàn thành nghĩa vụ; có biên bản thanh lý/hoàn trả thư.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Ghi nhận trả bản gốc hoặc biên bản thanh lý; cập nhật trạng thái RELEASED."
+        }
+      ],
+      "expected_result": "Đóng hồ sơ Inward; giải phóng điều kiện giữ lại bảo hành/tạm ứng trên phân hệ Mua hàng Core ERP.",
+      "source_ref": "Mục 6.1-6.2, trang 12-14"
+    },
+    {
+      "case_key": "BG-IN-012",
+      "req_key": "BG-REQ-IN-01",
+      "title": "Kiểm tra trường inward_status so với state machine Inward",
+      "test_type": "Boundary",
+      "priority": "Medium",
+      "preconditions": "Có hồ sơ Inward đi qua các trạng thái RECEIVED, AUTHENTICATED, ACTIVE, EXPIRING_SOON, EXTENDED, INVOKED_CLAIM, CLAIM_COLLECTED, RELEASED.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Đối chiếu danh sách trạng thái/giá trị cho phép tại field inward_status với state machine mục 6.2; thử lưu các trạng thái."
+        }
+      ],
+      "expected_result": "Hệ thống phải hỗ trợ đủ trạng thái được phê duyệt. BRD hiện mô tả field inward_status với tập giá trị rút gọn khác state machine; cần xác nhận mapping trước khi chốt.",
+      "source_ref": "Mục 6.2, trang 13-14"
+    },
+    {
+      "case_key": "BG-GL-001",
+      "req_key": "BG-REQ-GL-01",
+      "title": "Trigger BG_ISSUE_OUT khi Outward ACTIVE",
+      "test_type": "Integration",
+      "priority": "Critical",
+      "preconditions": "Bảo lãnh Outward được ngân hàng phát hành và kích hoạt ACTIVE.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Kích hoạt bảo lãnh; kiểm tra journal/event gửi Core ERP."
+        }
+      ],
+      "expected_result": "Phát sinh sự kiện BG_ISSUE_OUT ghi nhận nghĩa vụ cam kết ngoại bảng TK 007 đúng thời điểm ACTIVE; không phát sinh ở DRAFT/REVIEW.",
+      "source_ref": "Mục 7, trang 14"
+    },
+    {
+      "case_key": "BG-GL-002",
+      "req_key": "BG-REQ-GL-01",
+      "title": "Trigger BG_MARGIN_LOCK khi ngân hàng trích nợ ký quỹ được MT940 đối chiếu",
+      "test_type": "Integration",
+      "priority": "Critical",
+      "preconditions": "Có margin amount; ngân hàng gửi giao dịch trích nợ; MT940 đã match.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Đưa giao dịch trích ký quỹ vào luồng đối chiếu; kiểm tra trạng thái trước/sau matched và bút toán."
+        }
+      ],
+      "expected_result": "Chỉ khi MT940 matched thành công mới trigger BG_MARGIN_LOCK; Nợ 1128/244, Có 1121/1122 theo ma trận BRD.",
+      "source_ref": "Mục 7, trang 14"
+    },
+    {
+      "case_key": "BG-GL-003",
+      "req_key": "BG-REQ-GL-01",
+      "title": "Trigger BG_FEE_EXPENSE khi ngân hàng thu phí",
+      "test_type": "Integration",
+      "priority": "High",
+      "preconditions": "Có phí phát hành/tu chỉnh và giao dịch thu phí ngân hàng.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Đối chiếu giao dịch thu phí; kiểm tra event và bút toán."
+        }
+      ],
+      "expected_result": "Nợ 642/635, Có 1121/1122 theo ma trận; không hạch toán lặp cùng một giao dịch.",
+      "source_ref": "Mục 7, trang 14"
+    },
+    {
+      "case_key": "BG-GL-004",
+      "req_key": "BG-REQ-GL-01",
+      "title": "Hạch toán BG_AMEND_INC và BG_AMEND_DEC",
+      "test_type": "Integration",
+      "priority": "Critical",
+      "preconditions": "Có amendment tăng và giảm được duyệt.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Phê duyệt từng amendment; đối chiếu event và giá trị chênh lệch ngoại bảng."
+        }
+      ],
+      "expected_result": "Tăng: ghi Nợ 007 phần giá trị tăng thêm; Giảm: ghi Có 007 phần giá trị giảm theo ma trận BRD.",
+      "source_ref": "Mục 7, trang 14"
+    },
+    {
+      "case_key": "BG-GL-005",
+      "req_key": "BG-REQ-GL-01",
+      "title": "Hạch toán BG_SETTLE_CLOSE khi tất toán thành công",
+      "test_type": "Integration",
+      "priority": "Critical",
+      "preconditions": "Có settlement được ngân hàng xác nhận thành công.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Hoàn tất tất toán; kiểm tra bút toán đóng cam kết."
+        }
+      ],
+      "expected_result": "Ghi Có TK 007 để xóa nghĩa vụ cam kết theo ma trận; chỉ phát sinh một lần khi settlement thành công.",
+      "source_ref": "Mục 7, trang 14"
+    },
+    {
+      "case_key": "BG-GL-006",
+      "req_key": "BG-REQ-GL-01",
+      "title": "Hạch toán BG_MARGIN_REFUND khi giải tỏa ký quỹ",
+      "test_type": "Integration",
+      "priority": "High",
+      "preconditions": "Có ký quỹ đang phong tỏa; hồ sơ giải tỏa hợp lệ; tài khoản nhận tiền đúng.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Thực hiện giải tỏa; đối chiếu journal."
+        }
+      ],
+      "expected_result": "Nợ 1121/1122, Có 1128/244 theo ma trận; số tiền và tài khoản nhận khớp hồ sơ.",
+      "source_ref": "Mục 7, trang 14"
+    },
+    {
+      "case_key": "BG-GL-007",
+      "req_key": "BG-REQ-GL-01",
+      "title": "Đảm bảo không ghi nhận bút toán GL trùng khi retry sự kiện",
+      "test_type": "Negative",
+      "priority": "Critical",
+      "preconditions": "Một sự kiện BG đã được Core ERP tiếp nhận; có khả năng gửi lại/retry.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Gửi lặp cùng event reference cho BG issue/amendment/settlement; kiểm tra số journal và event log."
+        }
+      ],
+      "expected_result": "Không ghi nhận trùng nghĩa vụ/chi phí; sự kiện retry phải có cơ chế idempotency hoặc được phát hiện là đã xử lý. Cơ chế cụ thể cần xác nhận trong đặc tả tích hợp.",
+      "source_ref": "Suy luận kiểm thử từ mục 7; BRD chưa mô tả idempotency"
+    },
+    {
+      "case_key": "BG-RISK-001",
+      "req_key": "BG-REQ-RISK-01",
+      "title": "Cảnh báo Outward trước ngày hết hạn 30, 15 và 7 ngày",
+      "test_type": "Risk",
+      "priority": "Critical",
+      "preconditions": "Có Outward ACTIVE; Notification Email/App hoạt động.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tạo dữ liệu hết hạn sau 31, 30, 15, 7 ngày; chạy job cảnh báo; kiểm tra nội dung và đối tượng nhận Treasury/Ban điều hành dự án."
+        }
+      ],
+      "expected_result": "Gửi cảnh báo tại đúng các mốc 30/15/7 ngày; không gửi sớm/muộn hoặc lặp ngoài chính sách.",
+      "source_ref": "Mục 8.1, trang 15"
+    },
+    {
+      "case_key": "BG-RISK-002",
+      "req_key": "BG-REQ-RISK-01",
+      "title": "Tự chuyển EXPIRING_SOON khi còn không quá 30 ngày",
+      "test_type": "State Transition",
+      "priority": "High",
+      "preconditions": "Outward ACTIVE có expiry_date đã xác định.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Kiểm tra hồ sơ ở các mốc 31 và 30 ngày trước expiry_date."
+        }
+      ],
+      "expected_result": "Chỉ khi thời hạn còn ≤30 ngày mới chuyển EXPIRING_SOON và kích hoạt cảnh báo theo cấu hình.",
+      "source_ref": "Mục 3.2 và 8.1, trang 7, 15"
+    },
+    {
+      "case_key": "BG-RISK-003",
+      "req_key": "BG-REQ-RISK-01",
+      "title": "Cảnh báo APB còn dư tạm ứng lớn khi gần hết hạn",
+      "test_type": "Risk",
+      "priority": "Critical",
+      "preconditions": "Có APB gần hết hạn và dư nợ tạm ứng ERP chưa thu hồi.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Thiết lập số dư tạm ứng còn tồn; chạy cảnh báo APB; so sánh với hồ sơ không còn dư nợ."
+        }
+      ],
+      "expected_result": "Cảnh báo khi điều kiện APB sắp hết hạn và số dư tạm ứng còn tồn đọng lớn được đáp ứng; ngưỡng 'lớn' cần cấu hình/định nghĩa.",
+      "source_ref": "Mục 8.1, trang 15"
+    },
+    {
+      "case_key": "BG-RISK-004",
+      "req_key": "BG-REQ-RISK-01",
+      "title": "Cảnh báo vàng tại 85% và đỏ tại 95% sử dụng hạn mức",
+      "test_type": "Boundary",
+      "priority": "Critical",
+      "preconditions": "Có hạn mức bảo lãnh và dữ liệu sử dụng kiểm soát được.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Tạo dữ liệu mức sử dụng 84.99%, 85%, 94.99%, 95% và trên 95%; kiểm tra tag/cảnh báo."
+        }
+      ],
+      "expected_result": "Vàng từ 85%; Đỏ từ 95%; tính tỷ lệ đúng mẫu số và tổng cam kết đang sử dụng.",
+      "source_ref": "Mục 8.1, trang 15"
+    },
+    {
+      "case_key": "BG-RPT-001",
+      "req_key": "BG-REQ-RPT-01",
+      "title": "Báo cáo phát hành bảo lãnh toàn tập đoàn",
+      "test_type": "Report",
+      "priority": "High",
+      "preconditions": "Có dữ liệu nhiều pháp nhân, ngân hàng, loại bảo lãnh và phí.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Mở báo cáo; lọc theo pháp nhân/ngân hàng/loại; đối chiếu tổng số dư ngoại bảng, ký quỹ bình quân, phí đã trả với sổ nguồn."
+        }
+      ],
+      "expected_result": "Số liệu phân nhóm và tổng hợp chính xác; bộ lọc không làm thiếu/trùng bản ghi.",
+      "source_ref": "Mục 8.2, trang 15"
+    },
+    {
+      "case_key": "BG-RPT-002",
+      "req_key": "BG-REQ-RPT-01",
+      "title": "Báo cáo danh mục bảo lãnh nhận Inward Portfolio",
+      "test_type": "Report",
+      "priority": "High",
+      "preconditions": "Có nhiều Inward BG với trạng thái và tiến độ PO khác nhau.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Mở báo cáo Inward Portfolio; lọc theo trạng thái/đối tác/hợp đồng; đối chiếu giá trị và tiến độ."
+        }
+      ],
+      "expected_result": "Báo cáo phản ánh đầy đủ danh mục, trạng thái hiệu lực, giá trị bảo lãnh và tiến độ hoàn thành hợp đồng cơ sở.",
+      "source_ref": "Mục 8.2, trang 15"
+    },
+    {
+      "case_key": "BG-RPT-003",
+      "req_key": "BG-REQ-RPT-01",
+      "title": "Báo cáo đối chiếu tiền ký quỹ bảo lãnh",
+      "test_type": "Reconciliation",
+      "priority": "Critical",
+      "preconditions": "Có số dư ký quỹ ngân hàng, sổ 1128/244 ERP và thư bảo lãnh còn lưu hành.",
+      "steps": [
+        {
+          "action": "manual",
+          "description": "Chạy báo cáo đối chiếu; tạo trường hợp khớp, thiếu, thừa và lệch tài khoản; drill-down từng chênh lệch."
+        }
+      ],
+      "expected_result": "Đối chiếu được số dư ngân hàng với 1128/244 và danh mục bảo lãnh; chênh lệch được chỉ rõ để xử lý.",
+      "source_ref": "Mục 8.2, trang 15"
+    }
+  ],
+  "open_questions": [
+    {
+      "id": "Q01",
+      "topic": "Công thức hạn mức",
+      "detail": "Mục 3.2 ghi HMBL còn lại = Max { [HM HĐTD - (Dư nợ vay + Bảo lãnh + LC)] & [HM Bảo lãnh - Dư nợ Bảo lãnh] }. Xác nhận phép kết hợp là Max hay Min, và cách xử lý giới hạn đồng thời."
+    },
+    {
+      "id": "Q02",
+      "topic": "Master Data Inward",
+      "detail": "Mục 2.1 liệt kê IN-PB và IN-WB; trường 53 mục 6.2 còn liệt kê IN-APB. Xác nhận có hỗ trợ IN-APB và cập nhật danh mục chuẩn."
+    },
+    {
+      "id": "Q03",
+      "topic": "Inward status",
+      "detail": "State machine có 8 trạng thái; trường inward_status mô tả danh sách rút gọn. Xác nhận mã DB và mapping đầy đủ."
+    },
+    {
+      "id": "Q04",
+      "topic": "APB partial release",
+      "detail": "Mỗi đợt thanh toán làm giảm bảo lãnh theo tỷ lệ tạm ứng tương ứng, nhưng chưa có công thức, tỷ lệ, rounding, điều kiện hoàn tất và xử lý event trùng."
+    },
+    {
+      "id": "Q05",
+      "topic": "Approval workflow",
+      "detail": "Sơ đồ trang 2 có CCM13.3, 13.5, 13.6 và 13.10, 13.13-13.21; nội dung mô tả chi tiết hiện thiếu nhiều bước, role, transition và exception."
+    },
+    {
+      "id": "Q06",
+      "topic": "Cảnh báo APB",
+      "detail": "BRD nêu số dư tạm ứng còn tồn đọng lớn nhưng chưa định nghĩa ngưỡng, nguồn số liệu và thời điểm đánh giá."
+    },
+    {
+      "id": "Q07",
+      "topic": "Quyền và audit",
+      "detail": "BRD chưa có ma trận role/action, phạm vi pháp nhân cho từng thao tác, quy tắc phê duyệt nhiều cấp, audit log và xử lý sửa/hủy sau khi gửi ngân hàng."
+    },
+    {
+      "id": "Q08",
+      "topic": "Tích hợp và chống ghi trùng",
+      "detail": "Chưa có API/event contract, idempotency key, mapping lỗi, retry/reversal, SLA đồng bộ cho ERP, HĐTD, BAM, MT940 và ngân hàng."
+    },
+    {
+      "id": "Q09",
+      "topic": "UI/field mapping",
+      "detail": "Ảnh minh họa có màn hình Outward, danh sách và Amendment; chưa có ảnh chi tiết UI Settlement, Inward, GL, Alert và Report để xác định selector và hành vi giao diện."
+    }
+  ]
+}
