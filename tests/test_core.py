@@ -1196,3 +1196,60 @@ def test_inspector_mapping_suggestions_skip_elements_without_grounded_locator():
         }],
     }
     assert build_mapping_suggestions(inspection, "ccm.guarantee.list") == []
+
+
+def test_risk_ui_pilot_is_read_only_evidence_based_and_assessable():
+    from core.application_profile import load_application_profile
+    from core.automation_assessment import assess_test_case
+    from core.pilot_cases import risk_indicators_ui_smoke_case
+    from core.test_generator import validate_steps_json
+
+    case = risk_indicators_ui_smoke_case()
+    assert case["case_key"] == "TC-021BE33A-UI-01"
+    assert case["req_key"] == "BG-REQ-RISK-01"
+    steps = validate_steps_json(case["steps"])
+    assert steps[0] == {"action": "navigate", "page": "ccm.guarantee.list", "timeout": 15000}
+    assert [step.get("expected") for step in steps[1:]] == [
+        "Tổng bảo lãnh", "Đã bồi thường", "Sắp hết hạn"
+    ]
+    assert not any(step["action"] in {"click", "fill", "select_option", "check", "uncheck"} for step in steps)
+
+    profile = load_application_profile("oap-meta")
+    assessment = assess_test_case({
+        **case,
+        "steps_json": json.dumps(steps, ensure_ascii=False),
+    }, profile)
+    assert assessment["status"] == "READY"
+    assert assessment["recommended_level"] == "automatable"
+    assert assessment["target_count"] == 0
+    # The test's own expected result explicitly limits what this pilot claims.
+    assert "KHÔNG xác nhận công thức 85%/95%" in case["expected_result"]
+    assert "lịch cảnh báo 30/15/7 ngày" in case["expected_result"]
+
+
+def test_risk_ui_pilot_adds_as_separate_case_without_overwriting_original(tmp_path):
+    from core.db import init_db, create_project, save_requirements, add_test_cases, list_test_cases
+    from core.pilot_cases import risk_indicators_ui_smoke_case
+
+    db_path = str(tmp_path / "risk-pilot.sqlite3")
+    init_db(db_path)
+    project_id = create_project("Risk pilot", "Keep source case intact", db_path=db_path)
+    save_requirements(project_id, [{
+        "req_key": "BG-REQ-RISK-01",
+        "title": "Cảnh báo rủi ro và ngưỡng hạn mức",
+        "description": "Cảnh báo đáo hạn và mức sử dụng hạn mức 85%/95%.",
+    }], db_path=db_path)
+    original = {
+        "case_key": "TC-021BE33A",
+        "req_key": "BG-REQ-RISK-01",
+        "title": "[BG-REQ-RISK-01] Positive: Cảnh báo rủi ro và ngưỡng hạn mức",
+        "steps": [{"action": "manual", "description": "Business risk setup is not automated yet."}],
+        "automation_level": "manual",
+    }
+    add_test_cases(project_id, [original], db_path=db_path)
+    add_test_cases(project_id, [risk_indicators_ui_smoke_case()], db_path=db_path)
+    cases = {item["case_key"]: item for item in list_test_cases(project_id, db_path=db_path)}
+    assert set(cases) == {"TC-021BE33A", "TC-021BE33A-UI-01"}
+    assert cases["TC-021BE33A"]["automation_level"] == "manual"
+    assert "Business risk setup" in cases["TC-021BE33A"]["steps_json"]
+    assert cases["TC-021BE33A-UI-01"]["automation_level"] == "automatable"
