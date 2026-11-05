@@ -26,6 +26,7 @@ try:
         assess_cases, assess_test_case, assessment_summary, build_mapping_coverage,
     )
     from core.mapping_suggestions import build_mapping_suggestions
+    from core.pilot_cases import risk_indicators_ui_smoke_case
     from core.runner_client import inspect_page, run_suite
     from core.db import (
         add_test_cases, create_project, init_db, list_projects, list_requirements,
