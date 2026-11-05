@@ -420,6 +420,42 @@ with tab_cases:
         st.info("Chưa có Test Case. Hãy nạp bộ kiểm thử bảo lãnh hoặc tạo từ danh sách yêu cầu.")
 
 with tab_mapping:
+    st.subheader("Pilot: kiểm thử chỉ tiêu rủi ro trên màn hình Bảo lãnh")
+    pilot_case = risk_indicators_ui_smoke_case()
+    current_project_cases = list_test_cases(pid)
+    existing_pilot = next(
+        (item for item in current_project_cases if item.get("case_key") == pilot_case["case_key"]),
+        None,
+    )
+    st.info(
+        "Case pilot này chỉ kiểm tra 3 nhãn đã quan sát trên Staging: "
+        "**Tổng bảo lãnh**, **Đã bồi thường**, **Sắp hết hạn**. "
+        "Nó không xác nhận ngưỡng 85%/95%, lịch cảnh báo 30/15/7 ngày hay logic APB."
+    )
+    if existing_pilot:
+        st.success(
+            f"Đã có case pilot {pilot_case['case_key']} trong dự án. "
+            "Không tạo trùng; có thể đánh giá lại và chạy ở tab Thực thi."
+        )
+    elif st.button(
+        "＋ Tạo Test Case pilot UI (read-only)",
+        type="primary",
+        key=f"create_risk_ui_pilot_{pid}",
+    ):
+        try:
+            created = add_test_cases(pid, [pilot_case])
+            if created:
+                st.success(
+                    f"Đã tạo {pilot_case['case_key']}. Case gốc TC-021BE33A được giữ nguyên; "
+                    "không thay đổi nội dung hoặc trạng thái của case gốc."
+                )
+            else:
+                st.info("Case pilot đã tồn tại; không tạo bản ghi trùng.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Không thể tạo case pilot: {exc}")
+
+    st.divider()
     st.subheader("Đánh giá khả năng tự động hóa")
     fresh_cases = list_test_cases(pid)
     project_mappings = list_application_mappings(pid, application_profile_id)
