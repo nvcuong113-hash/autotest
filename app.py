@@ -458,391 +458,405 @@ with tab_mapping:
         )
         st.rerun()
 
-    st.markdown("**Danh sách Test Case và lý do bị chặn**")
-    if assessments:
-        assessment_view = pd.DataFrame([{
-            "Mã Test Case": item["case_key"],
-            "Mã yêu cầu": item["req_key"],
-            "Tên Test Case": item["title"],
-            "Mức hiện tại": item["current_level"],
-            "Đề xuất": item["recommended_level"],
-            "Trạng thái": "SẴN SÀNG" if item["status"] == "READY" else "BỊ CHẶN",
-            "Lý do / Việc cần làm": item["blocked_reason"],
-            "Số target": item["target_count"],
-        } for item in assessments])
-        st.dataframe(assessment_view, use_container_width=True, hide_index=True)
-    else:
-        st.info("Dự án chưa có Test Case.")
-
-    st.divider()
-    st.subheader("Mapping Coverage theo màn hình và target")
-    st.caption(
-        "Một mapping đã xác minh được dùng chung cho mọi Test Case trong dự án tham chiếu cùng "
-        "page/target. Không cần khai báo selector riêng cho từng Test Case."
-    )
-    if coverage:
-        coverage_view = pd.DataFrame([{
-            "Màn hình": item["page_id"],
-            "Semantic target": item["target_id"],
-            "Trạng thái mapping": item["mapping_status"],
-            "Số Test Case sử dụng": item["usage_count"],
-            "Các Test Case": item["case_keys"],
-            "Locator": item["locator"],
-        } for item in coverage])
-        st.dataframe(coverage_view, use_container_width=True, hide_index=True)
-    else:
-        st.info(
-            "Chưa có Test Case nào chứa semantic target. Bộ 75 case mẫu hiện vẫn là manual placeholder; "
-            "cần chuyển từng nhóm bước nghiệp vụ sang semantic action trước khi mapping có thể mở khóa."
-        )
-
-    st.divider()
-    st.subheader("Tạo / cập nhật mapping dùng chung")
-    st.caption(
-        "Chọn target đã được Test Case tham chiếu hoặc tạo target mới. Mapping lưu ở cấp dự án + Application Profile; "
-        "chỉ đánh dấu xác minh sau khi đã kiểm tra locator trên đúng màn hình Staging."
-    )
-    page_ids = list((effective_profile.get("pages") or {}).keys())
-    if not page_ids:
-        st.warning("Application Profile chưa khai báo page nghiệp vụ.")
-    else:
-        page_options = [""] + page_ids
-        target_refs = [item for item in coverage if item["target_id"]]
-        target_choice_options = ["Tạo target mới"] + [
-            f"{item['page_id']} :: {item['target_id']}" for item in target_refs
-        ]
-        target_choice_key = f"map_target_choice_{pid}"
-        target_id_key = f"map_target_id_{pid}"
-        page_key = f"map_page_{pid}"
-
-        def _sync_mapping_target_choice():
-            choice = st.session_state.get(target_choice_key, "Tạo target mới")
-            if choice == "Tạo target mới":
-                st.session_state[target_id_key] = ""
-                return
-            page_label, target_value = choice.split(" :: ", 1)
-            st.session_state[target_id_key] = target_value
-            if page_label == "(Shared)":
-                st.session_state[page_key] = ""
-            elif page_label in page_ids:
-                st.session_state[page_key] = page_label
-
-        target_choice = st.selectbox(
-            "Target cần mapping / cập nhật",
-            target_choice_options,
-            key=target_choice_key,
-            on_change=_sync_mapping_target_choice,
-        )
-        page_id = st.selectbox(
-            "Màn hình / Page",
-            page_options,
-            format_func=lambda value: (
-                "Component dùng chung (Shared)" if not value
-                else str((effective_profile.get("pages") or {}).get(value, {}).get("name") or value)
-            ),
-            key=page_key,
-        )
-
-        inspection = st.session_state.get(f"inspection_{pid}") or {}
-        candidates = []
-        for item in inspection.get("inputs", []) + inspection.get("buttons", []):
-            selector = str(item.get("suggested_selector") or "").strip()
-            if not selector:
-                continue
-            candidates.append(item)
-        candidate_labels = ["Không lấy từ Inspector"] + [
-            f"{item.get('tag','element')} · {item.get('name') or item.get('id') or item.get('text') or item.get('placeholder') or 'không nhãn'} · {item.get('suggested_selector')}"
-            for item in candidates
-        ]
-        candidate_key = f"map_candidate_{pid}"
-        locator_value_key = f"map_locator_value_{pid}"
-        locator_name_key = f"map_locator_name_{pid}"
-
-        def _sync_inspector_candidate():
-            label = st.session_state.get(candidate_key, "Không lấy từ Inspector")
-            if label == "Không lấy từ Inspector":
-                st.session_state[locator_value_key] = ""
-                st.session_state[locator_name_key] = ""
-                return
-            candidate_index = candidate_labels.index(label) - 1
-            if 0 <= candidate_index < len(candidates):
-                candidate = candidates[candidate_index]
-                st.session_state[locator_value_key] = str(candidate.get("suggested_selector") or "")
-                st.session_state[locator_name_key] = str(candidate.get("aria_label") or candidate.get("text") or "")
-
-        candidate_label = st.selectbox(
-            "Phần tử gợi ý từ lần Inspector gần nhất",
-            candidate_labels,
-            key=candidate_key,
-            on_change=_sync_inspector_candidate,
-        )
-        selected_candidate = (
-            candidates[candidate_labels.index(candidate_label) - 1]
-            if candidate_label != "Không lấy từ Inspector" else {}
-        )
-        if target_id_key not in st.session_state:
-            st.session_state[target_id_key] = ""
-        if locator_value_key not in st.session_state:
-            st.session_state[locator_value_key] = str(selected_candidate.get("suggested_selector") or "")
-        if locator_name_key not in st.session_state:
-            st.session_state[locator_name_key] = str(selected_candidate.get("aria_label") or selected_candidate.get("text") or "")
-
-        target_id = st.text_input(
-            "Semantic target ID",
-            placeholder="Ví dụ: guarantee.filter.keyword",
-            key=target_id_key,
-            help="Dùng tên nghiệp vụ ổn định. Một target có thể được tham chiếu bởi nhiều Test Case.",
-        )
-        strategy_options = ["css", "role", "label", "placeholder", "text"]
-        strategy = st.selectbox(
-            "Loại locator",
-            strategy_options,
-            index=0,
-            key=f"map_strategy_{pid}",
-        )
-        locator_value = st.text_input(
-            "Locator value",
-            placeholder="Ví dụ: input[name='f_keyword']",
-            key=locator_value_key,
-        )
-        locator_name = st.text_input(
-            "Accessible name (chỉ dùng cho role)",
-            key=locator_name_key,
-        )
-        exact = st.checkbox("So khớp chính xác", value=True, key=f"map_exact_{pid}")
-        evidence_default = ""
-        if selected_candidate:
-            evidence_default = (
-                f"Inspector URL: {inspection.get('final_url','')}; "
-                f"tag={selected_candidate.get('tag','')}; id={selected_candidate.get('id','')}; "
-                f"name={selected_candidate.get('name','')}; placeholder={selected_candidate.get('placeholder','')}"
-            )
-        evidence = st.text_area(
-            "Bằng chứng rà soát / ghi chú",
-            value=evidence_default,
-            height=75,
-            key=f"map_evidence_{pid}",
-        )
-        verified = st.checkbox(
-            "Tôi đã kiểm tra locator này trên đúng màn hình và xác nhận nó trỏ tới phần tử nghiệp vụ mong muốn",
-            value=False,
-            key=f"map_verified_{pid}",
-        )
-        if st.button(
-            "Lưu mapping dùng chung",
-            type="primary",
-            disabled=not target_id.strip() or not locator_value.strip(),
-            key=f"save_mapping_{pid}",
-        ):
-            try:
-                if target_id.strip().startswith("auth."):
-                    raise ValueError("Không được dùng form mapping nghiệp vụ để ghi đè target xác thực.")
-                saved = save_application_mappings(pid, application_profile_id, [{
-                    "page_id": page_id,
-                    "target_id": target_id.strip(),
-                    "locator_by": strategy,
-                    "locator_value": locator_value.strip(),
-                    "locator_name": locator_name.strip(),
-                    "exact": exact,
-                    "verified": verified,
-                    "evidence": evidence.strip(),
-                }])
-                st.success(
-                    f"Đã lưu {saved} mapping. "
-                    + ("Mapping đã xác minh và sẽ được dùng chung cho các Test Case tham chiếu target này."
-                       if verified else "Mapping đang ở trạng thái CHƯA XÁC MINH nên chưa được phép chạy.")
-                )
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Không thể lưu mapping: {exc}")
-
-    if project_mappings:
-        st.markdown("**Mapping đã lưu trong dự án**")
-        mapping_view = pd.DataFrame([{
-            "Màn hình": item.get("page_id") or "(Shared)",
-            "Semantic target": item.get("target_id"),
-            "Locator": f"{item.get('locator_by')}: {item.get('locator_value')}",
-            "Xác minh": "Có" if item.get("verified") else "Chưa",
-            "Bằng chứng": item.get("evidence") or "",
-        } for item in project_mappings])
-        st.dataframe(mapping_view, use_container_width=True, hide_index=True)
-        mapping_options = {
-            f"{item.get('page_id') or '(Shared)'} :: {item.get('target_id')}": item
-            for item in project_mappings
-        }
-        selected_mapping_label = st.selectbox(
-            "Mapping cần gỡ",
-            list(mapping_options),
-            key=f"delete_mapping_select_{pid}",
-        )
-        if st.button("Gỡ mapping đã chọn", key=f"delete_mapping_{pid}"):
-            item = mapping_options[selected_mapping_label]
-            delete_application_mapping(
-                pid, application_profile_id,
-                str(item.get("page_id") or ""), str(item.get("target_id") or ""),
-            )
-            st.success("Đã gỡ mapping. Các Test Case tham chiếu target này sẽ bị chặn cho đến khi mapping hợp lệ được khôi phục.")
-            st.rerun()
-
-    st.divider()
-    st.subheader("Workflow Builder — gán mapping vào Test Case")
-    st.caption(
-        "Đây là bước còn thiếu khi Test Case đang có placeholder manual: chọn Test Case, "
-        "xây dựng các thao tác nghiệp vụ bằng semantic target đã mapping, thêm assertion rồi lưu. "
-        "Không cần viết CSS/XPath hoặc JSON bằng tay."
-    )
-
-    workflow_cases = list_test_cases(pid)
-    if not workflow_cases:
-        st.info("Chưa có Test Case để xây dựng workflow.")
-    else:
-        workflow_case_options = {
-            f"{item['case_key']} — {item['title']}": item
-            for item in workflow_cases
-        }
-        workflow_case_label = st.selectbox(
-            "Test Case cần gán workflow",
-            list(workflow_case_options),
-            key=f"workflow_case_select_{pid}",
-        )
-        workflow_case = workflow_case_options[workflow_case_label]
-
-        workflow_pages = list((effective_profile.get("pages") or {}).keys())
-        workflow_targets = set()
-        for page_id, page in (effective_profile.get("pages") or {}).items():
-            for target_id in (page.get("targets") or {}):
-                workflow_targets.add(str(target_id))
-        for target_id in (effective_profile.get("shared_targets") or {}):
-            workflow_targets.add(str(target_id))
-        workflow_target_options = [""] + sorted(workflow_targets)
-
-        existing_steps = []
-        try:
-            parsed_steps = json.loads(workflow_case.get("steps_json") or "[]")
-            if isinstance(parsed_steps, list):
-                existing_steps = [
-                    step for step in parsed_steps
-                    if isinstance(step, dict) and step.get("action") != "manual"
-                ]
-        except (TypeError, json.JSONDecodeError):
-            existing_steps = []
-
-        workflow_rows = []
-        for index, step in enumerate(existing_steps, 1):
-            workflow_rows.append({
-                "order": index,
-                "action": str(step.get("action") or "click"),
-                "page": str(step.get("page") or ""),
-                "target": str(step.get("target") or ""),
-                "value": str(step.get("value") or ""),
-                "expected": str(step.get("expected") or step.get("contains") or ""),
-            })
-        if not workflow_rows:
-            workflow_rows = [{
-                "order": 1,
-                "action": "navigate",
-                "page": workflow_pages[0] if workflow_pages else "",
-                "target": "",
-                "value": "",
-                "expected": "",
-            }]
-
-        workflow_action_options = [
-            "navigate", "click", "fill", "select_option", "check", "uncheck",
-            "expect_visible", "expect_hidden", "expect_text", "expect_url",
-            "wait_for", "assert_state",
-        ]
-        workflow_editor = st.data_editor(
-            pd.DataFrame(workflow_rows, columns=[
-                "order", "action", "page", "target", "value", "expected",
-            ]),
-            use_container_width=True,
-            hide_index=True,
-            num_rows="dynamic",
-            key=f"workflow_editor_{pid}_{workflow_case['id']}",
-            column_config={
-                "order": st.column_config.NumberColumn("Thứ tự", min_value=1, step=1),
-                "action": st.column_config.SelectboxColumn(
-                    "Thao tác",
-                    options=workflow_action_options,
-                    required=True,
-                ),
-                "page": st.column_config.SelectboxColumn(
-                    "Page (để trống nếu dùng page hiện tại)",
-                    options=[""] + workflow_pages,
-                ),
-                "target": st.column_config.SelectboxColumn(
-                    "Semantic target đã mapping",
-                    options=workflow_target_options,
-                ),
-                "value": st.column_config.TextColumn("Giá trị nhập / chọn"),
-                "expected": st.column_config.TextColumn("Kết quả cần kiểm chứng"),
-            },
-        )
-        st.caption(
-            "Ví dụ: navigate → fill (target ô tìm kiếm) → click (target nút Tìm kiếm) "
-            "→ expect_visible (target bảng kết quả). Với kết quả toàn trang, dùng expect_text và điền expected."
-        )
-
-        if st.button(
-            "Lưu workflow và đánh giá Test Case",
-            type="primary",
-            key=f"save_workflow_{pid}_{workflow_case['id']}",
-        ):
-            try:
-                normalized_rows = workflow_editor.to_dict("records")
-                normalized_rows.sort(key=lambda row: int(row.get("order") or 999999))
-                new_steps = []
-                for index, row in enumerate(normalized_rows, 1):
-                    action = str(row.get("action") or "").strip()
-                    if not action:
-                        continue
-                    page_value = str(row.get("page") or "").strip()
-                    target_value = str(row.get("target") or "").strip()
-                    value_text = str(row.get("value") or "").strip()
-                    expected_text = str(row.get("expected") or "").strip()
-                    step = {"action": action}
-                    if page_value:
-                        step["page"] = page_value
-                    if target_value:
-                        step["target"] = target_value
-                    if value_text:
-                        step["value"] = value_text
-                    if expected_text:
-                        step["expected"] = expected_text
-                    if action == "navigate" and not page_value:
-                        raise ValueError(f"Bước {index}: navigate phải chọn Page.")
-                    if action in {"click", "fill", "select_option", "check", "uncheck",
-                                  "expect_visible", "expect_hidden", "assert_state"} and not target_value:
-                        raise ValueError(f"Bước {index}: {action} phải chọn semantic target.")
-                    new_steps.append(step)
-
-                validate_steps_json(new_steps)
-                updated_case = dict(workflow_case)
-                updated_case["steps_json"] = json.dumps(new_steps, ensure_ascii=False)
-                assessment = assess_test_case(updated_case, effective_profile)
-                update_test_case(int(workflow_case["id"]), {
-                    "steps_json": updated_case["steps_json"],
-                    "automation_level": assessment["recommended_level"],
-                })
-                if assessment["status"] == "READY":
-                    st.success(
-                        "Đã lưu workflow. Test Case đủ điều kiện tự động hóa; "
-                        "đã cập nhật mức automatable."
-                    )
-                else:
-                    st.warning(
-                        "Đã lưu workflow nhưng Test Case vẫn BLOCKED: "
-                        + (assessment["blocked_reason"] or "Cần rà soát thêm.")
-                    )
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Không thể lưu workflow: {type(exc).__name__}: {exc}")
-
     st.info(
-        "Quy tắc an toàn: mapping chỉ gắn locator vào semantic target; Workflow Builder mới gắn target "
-        "vào các bước nghiệp vụ. Chỉ case có đủ mapping đã xác minh và assertion mới được mở khóa chạy."
+        "Bắt đầu tại **Thiết lập Mapping & Workflow**: (1) tạo mapping cho phần tử từ Inspector, "
+        "(2) xác minh locator trên Staging, (3) chọn Test Case và xây dựng các bước nghiệp vụ. "
+        "Bảng 155 Test Case đã được chuyển sang thẻ riêng để không che khuất khu vực thao tác."
     )
+    setup_tab, coverage_tab = st.tabs(["🛠 Thiết lập Mapping & Workflow", "📊 Coverage & Test Case bị chặn"])
+
+    with setup_tab:
+            st.divider()
+            st.subheader("Tạo / cập nhật mapping dùng chung")
+            st.caption(
+                "Chọn target đã được Test Case tham chiếu hoặc tạo target mới. Mapping lưu ở cấp dự án + Application Profile; "
+                "chỉ đánh dấu xác minh sau khi đã kiểm tra locator trên đúng màn hình Staging."
+            )
+            page_ids = list((effective_profile.get("pages") or {}).keys())
+            if not page_ids:
+                st.warning("Application Profile chưa khai báo page nghiệp vụ.")
+            else:
+                page_options = [""] + page_ids
+                target_refs = [item for item in coverage if item["target_id"]]
+                target_choice_options = ["Tạo target mới"] + [
+                    f"{item['page_id']} :: {item['target_id']}" for item in target_refs
+                ]
+                target_choice_key = f"map_target_choice_{pid}"
+                target_id_key = f"map_target_id_{pid}"
+                page_key = f"map_page_{pid}"
+
+                def _sync_mapping_target_choice():
+                    choice = st.session_state.get(target_choice_key, "Tạo target mới")
+                    if choice == "Tạo target mới":
+                        st.session_state[target_id_key] = ""
+                        return
+                    page_label, target_value = choice.split(" :: ", 1)
+                    st.session_state[target_id_key] = target_value
+                    if page_label == "(Shared)":
+                        st.session_state[page_key] = ""
+                    elif page_label in page_ids:
+                        st.session_state[page_key] = page_label
+
+                target_choice = st.selectbox(
+                    "Target cần mapping / cập nhật",
+                    target_choice_options,
+                    key=target_choice_key,
+                    on_change=_sync_mapping_target_choice,
+                )
+                page_id = st.selectbox(
+                    "Màn hình / Page",
+                    page_options,
+                    format_func=lambda value: (
+                        "Component dùng chung (Shared)" if not value
+                        else str((effective_profile.get("pages") or {}).get(value, {}).get("name") or value)
+                    ),
+                    key=page_key,
+                )
+
+                inspection = st.session_state.get(f"inspection_{pid}") or {}
+                candidates = []
+                for item in inspection.get("inputs", []) + inspection.get("buttons", []):
+                    selector = str(item.get("suggested_selector") or "").strip()
+                    if not selector:
+                        continue
+                    candidates.append(item)
+                candidate_labels = ["Không lấy từ Inspector"] + [
+                    f"{item.get('tag','element')} · {item.get('name') or item.get('id') or item.get('text') or item.get('placeholder') or 'không nhãn'} · {item.get('suggested_selector')}"
+                    for item in candidates
+                ]
+                candidate_key = f"map_candidate_{pid}"
+                locator_value_key = f"map_locator_value_{pid}"
+                locator_name_key = f"map_locator_name_{pid}"
+
+                def _sync_inspector_candidate():
+                    label = st.session_state.get(candidate_key, "Không lấy từ Inspector")
+                    if label == "Không lấy từ Inspector":
+                        st.session_state[locator_value_key] = ""
+                        st.session_state[locator_name_key] = ""
+                        return
+                    candidate_index = candidate_labels.index(label) - 1
+                    if 0 <= candidate_index < len(candidates):
+                        candidate = candidates[candidate_index]
+                        st.session_state[locator_value_key] = str(candidate.get("suggested_selector") or "")
+                        st.session_state[locator_name_key] = str(candidate.get("aria_label") or candidate.get("text") or "")
+
+                candidate_label = st.selectbox(
+                    "Phần tử gợi ý từ lần Inspector gần nhất",
+                    candidate_labels,
+                    key=candidate_key,
+                    on_change=_sync_inspector_candidate,
+                )
+                selected_candidate = (
+                    candidates[candidate_labels.index(candidate_label) - 1]
+                    if candidate_label != "Không lấy từ Inspector" else {}
+                )
+                if target_id_key not in st.session_state:
+                    st.session_state[target_id_key] = ""
+                if locator_value_key not in st.session_state:
+                    st.session_state[locator_value_key] = str(selected_candidate.get("suggested_selector") or "")
+                if locator_name_key not in st.session_state:
+                    st.session_state[locator_name_key] = str(selected_candidate.get("aria_label") or selected_candidate.get("text") or "")
+
+                target_id = st.text_input(
+                    "Semantic target ID",
+                    placeholder="Ví dụ: guarantee.filter.keyword",
+                    key=target_id_key,
+                    help="Dùng tên nghiệp vụ ổn định. Một target có thể được tham chiếu bởi nhiều Test Case.",
+                )
+                strategy_options = ["css", "role", "label", "placeholder", "text"]
+                strategy = st.selectbox(
+                    "Loại locator",
+                    strategy_options,
+                    index=0,
+                    key=f"map_strategy_{pid}",
+                )
+                locator_value = st.text_input(
+                    "Locator value",
+                    placeholder="Ví dụ: input[name='f_keyword']",
+                    key=locator_value_key,
+                )
+                locator_name = st.text_input(
+                    "Accessible name (chỉ dùng cho role)",
+                    key=locator_name_key,
+                )
+                exact = st.checkbox("So khớp chính xác", value=True, key=f"map_exact_{pid}")
+                evidence_default = ""
+                if selected_candidate:
+                    evidence_default = (
+                        f"Inspector URL: {inspection.get('final_url','')}; "
+                        f"tag={selected_candidate.get('tag','')}; id={selected_candidate.get('id','')}; "
+                        f"name={selected_candidate.get('name','')}; placeholder={selected_candidate.get('placeholder','')}"
+                    )
+                evidence = st.text_area(
+                    "Bằng chứng rà soát / ghi chú",
+                    value=evidence_default,
+                    height=75,
+                    key=f"map_evidence_{pid}",
+                )
+                verified = st.checkbox(
+                    "Tôi đã kiểm tra locator này trên đúng màn hình và xác nhận nó trỏ tới phần tử nghiệp vụ mong muốn",
+                    value=False,
+                    key=f"map_verified_{pid}",
+                )
+                if st.button(
+                    "Lưu mapping dùng chung",
+                    type="primary",
+                    disabled=not target_id.strip() or not locator_value.strip(),
+                    key=f"save_mapping_{pid}",
+                ):
+                    try:
+                        if target_id.strip().startswith("auth."):
+                            raise ValueError("Không được dùng form mapping nghiệp vụ để ghi đè target xác thực.")
+                        saved = save_application_mappings(pid, application_profile_id, [{
+                            "page_id": page_id,
+                            "target_id": target_id.strip(),
+                            "locator_by": strategy,
+                            "locator_value": locator_value.strip(),
+                            "locator_name": locator_name.strip(),
+                            "exact": exact,
+                            "verified": verified,
+                            "evidence": evidence.strip(),
+                        }])
+                        st.success(
+                            f"Đã lưu {saved} mapping. "
+                            + ("Mapping đã xác minh và sẽ được dùng chung cho các Test Case tham chiếu target này."
+                               if verified else "Mapping đang ở trạng thái CHƯA XÁC MINH nên chưa được phép chạy.")
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Không thể lưu mapping: {exc}")
+
+            if project_mappings:
+                st.markdown("**Mapping đã lưu trong dự án**")
+                mapping_view = pd.DataFrame([{
+                    "Màn hình": item.get("page_id") or "(Shared)",
+                    "Semantic target": item.get("target_id"),
+                    "Locator": f"{item.get('locator_by')}: {item.get('locator_value')}",
+                    "Xác minh": "Có" if item.get("verified") else "Chưa",
+                    "Bằng chứng": item.get("evidence") or "",
+                } for item in project_mappings])
+                st.dataframe(mapping_view, use_container_width=True, hide_index=True)
+                mapping_options = {
+                    f"{item.get('page_id') or '(Shared)'} :: {item.get('target_id')}": item
+                    for item in project_mappings
+                }
+                selected_mapping_label = st.selectbox(
+                    "Mapping cần gỡ",
+                    list(mapping_options),
+                    key=f"delete_mapping_select_{pid}",
+                )
+                if st.button("Gỡ mapping đã chọn", key=f"delete_mapping_{pid}"):
+                    item = mapping_options[selected_mapping_label]
+                    delete_application_mapping(
+                        pid, application_profile_id,
+                        str(item.get("page_id") or ""), str(item.get("target_id") or ""),
+                    )
+                    st.success("Đã gỡ mapping. Các Test Case tham chiếu target này sẽ bị chặn cho đến khi mapping hợp lệ được khôi phục.")
+                    st.rerun()
+
+
+            st.divider()
+            st.subheader("Workflow Builder — gán mapping vào Test Case")
+            st.caption(
+                "Đây là bước còn thiếu khi Test Case đang có placeholder manual: chọn Test Case, "
+                "xây dựng các thao tác nghiệp vụ bằng semantic target đã mapping, thêm assertion rồi lưu. "
+                "Không cần viết CSS/XPath hoặc JSON bằng tay."
+            )
+
+            workflow_cases = list_test_cases(pid)
+            if not workflow_cases:
+                st.info("Chưa có Test Case để xây dựng workflow.")
+            else:
+                workflow_case_options = {
+                    f"{item['case_key']} — {item['title']}": item
+                    for item in workflow_cases
+                }
+                workflow_case_label = st.selectbox(
+                    "Test Case cần gán workflow",
+                    list(workflow_case_options),
+                    key=f"workflow_case_select_{pid}",
+                )
+                workflow_case = workflow_case_options[workflow_case_label]
+
+                workflow_pages = list((effective_profile.get("pages") or {}).keys())
+                workflow_targets = set()
+                for page_id, page in (effective_profile.get("pages") or {}).items():
+                    for target_id in (page.get("targets") or {}):
+                        workflow_targets.add(str(target_id))
+                for target_id in (effective_profile.get("shared_targets") or {}):
+                    workflow_targets.add(str(target_id))
+                workflow_target_options = [""] + sorted(workflow_targets)
+
+                existing_steps = []
+                try:
+                    parsed_steps = json.loads(workflow_case.get("steps_json") or "[]")
+                    if isinstance(parsed_steps, list):
+                        existing_steps = [
+                            step for step in parsed_steps
+                            if isinstance(step, dict) and step.get("action") != "manual"
+                        ]
+                except (TypeError, json.JSONDecodeError):
+                    existing_steps = []
+
+                workflow_rows = []
+                for index, step in enumerate(existing_steps, 1):
+                    workflow_rows.append({
+                        "order": index,
+                        "action": str(step.get("action") or "click"),
+                        "page": str(step.get("page") or ""),
+                        "target": str(step.get("target") or ""),
+                        "value": str(step.get("value") or ""),
+                        "expected": str(step.get("expected") or step.get("contains") or ""),
+                    })
+                if not workflow_rows:
+                    workflow_rows = [{
+                        "order": 1,
+                        "action": "navigate",
+                        "page": workflow_pages[0] if workflow_pages else "",
+                        "target": "",
+                        "value": "",
+                        "expected": "",
+                    }]
+
+                workflow_action_options = [
+                    "navigate", "click", "fill", "select_option", "check", "uncheck",
+                    "expect_visible", "expect_hidden", "expect_text", "expect_url",
+                    "wait_for", "assert_state",
+                ]
+                workflow_editor = st.data_editor(
+                    pd.DataFrame(workflow_rows, columns=[
+                        "order", "action", "page", "target", "value", "expected",
+                    ]),
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    key=f"workflow_editor_{pid}_{workflow_case['id']}",
+                    column_config={
+                        "order": st.column_config.NumberColumn("Thứ tự", min_value=1, step=1),
+                        "action": st.column_config.SelectboxColumn(
+                            "Thao tác",
+                            options=workflow_action_options,
+                            required=True,
+                        ),
+                        "page": st.column_config.SelectboxColumn(
+                            "Page (để trống nếu dùng page hiện tại)",
+                            options=[""] + workflow_pages,
+                        ),
+                        "target": st.column_config.SelectboxColumn(
+                            "Semantic target đã mapping",
+                            options=workflow_target_options,
+                        ),
+                        "value": st.column_config.TextColumn("Giá trị nhập / chọn"),
+                        "expected": st.column_config.TextColumn("Kết quả cần kiểm chứng"),
+                    },
+                )
+                st.caption(
+                    "Ví dụ: navigate → fill (target ô tìm kiếm) → click (target nút Tìm kiếm) "
+                    "→ expect_visible (target bảng kết quả). Với kết quả toàn trang, dùng expect_text và điền expected."
+                )
+
+                if st.button(
+                    "Lưu workflow và đánh giá Test Case",
+                    type="primary",
+                    key=f"save_workflow_{pid}_{workflow_case['id']}",
+                ):
+                    try:
+                        normalized_rows = workflow_editor.to_dict("records")
+                        normalized_rows.sort(key=lambda row: int(row.get("order") or 999999))
+                        new_steps = []
+                        for index, row in enumerate(normalized_rows, 1):
+                            action = str(row.get("action") or "").strip()
+                            if not action:
+                                continue
+                            page_value = str(row.get("page") or "").strip()
+                            target_value = str(row.get("target") or "").strip()
+                            value_text = str(row.get("value") or "").strip()
+                            expected_text = str(row.get("expected") or "").strip()
+                            step = {"action": action}
+                            if page_value:
+                                step["page"] = page_value
+                            if target_value:
+                                step["target"] = target_value
+                            if value_text:
+                                step["value"] = value_text
+                            if expected_text:
+                                step["expected"] = expected_text
+                            if action == "navigate" and not page_value:
+                                raise ValueError(f"Bước {index}: navigate phải chọn Page.")
+                            if action in {"click", "fill", "select_option", "check", "uncheck",
+                                          "expect_visible", "expect_hidden", "assert_state"} and not target_value:
+                                raise ValueError(f"Bước {index}: {action} phải chọn semantic target.")
+                            new_steps.append(step)
+
+                        validate_steps_json(new_steps)
+                        updated_case = dict(workflow_case)
+                        updated_case["steps_json"] = json.dumps(new_steps, ensure_ascii=False)
+                        assessment = assess_test_case(updated_case, effective_profile)
+                        update_test_case(int(workflow_case["id"]), {
+                            "steps_json": updated_case["steps_json"],
+                            "automation_level": assessment["recommended_level"],
+                        })
+                        if assessment["status"] == "READY":
+                            st.success(
+                                "Đã lưu workflow. Test Case đủ điều kiện tự động hóa; "
+                                "đã cập nhật mức automatable."
+                            )
+                        else:
+                            st.warning(
+                                "Đã lưu workflow nhưng Test Case vẫn BLOCKED: "
+                                + (assessment["blocked_reason"] or "Cần rà soát thêm.")
+                            )
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Không thể lưu workflow: {type(exc).__name__}: {exc}")
+
+            st.info(
+                "Quy tắc an toàn: mapping chỉ gắn locator vào semantic target; Workflow Builder mới gắn target "
+                "vào các bước nghiệp vụ. Chỉ case có đủ mapping đã xác minh và assertion mới được mở khóa chạy."
+            )
+
+
+    with coverage_tab:
+            st.markdown("**Danh sách Test Case và lý do bị chặn**")
+            if assessments:
+                assessment_view = pd.DataFrame([{
+                    "Mã Test Case": item["case_key"],
+                    "Mã yêu cầu": item["req_key"],
+                    "Tên Test Case": item["title"],
+                    "Mức hiện tại": item["current_level"],
+                    "Đề xuất": item["recommended_level"],
+                    "Trạng thái": "SẴN SÀNG" if item["status"] == "READY" else "BỊ CHẶN",
+                    "Lý do / Việc cần làm": item["blocked_reason"],
+                    "Số target": item["target_count"],
+                } for item in assessments])
+                st.dataframe(assessment_view, use_container_width=True, hide_index=True)
+            else:
+                st.info("Dự án chưa có Test Case.")
+
+
+            st.divider()
+            st.subheader("Mapping Coverage theo màn hình và target")
+            st.caption(
+                "Một mapping đã xác minh được dùng chung cho mọi Test Case trong dự án tham chiếu cùng "
+                "page/target. Không cần khai báo selector riêng cho từng Test Case."
+            )
+            if coverage:
+                coverage_view = pd.DataFrame([{
+                    "Màn hình": item["page_id"],
+                    "Semantic target": item["target_id"],
+                    "Trạng thái mapping": item["mapping_status"],
+                    "Số Test Case sử dụng": item["usage_count"],
+                    "Các Test Case": item["case_keys"],
+                    "Locator": item["locator"],
+                } for item in coverage])
+                st.dataframe(coverage_view, use_container_width=True, hide_index=True)
+            else:
+                st.info(
+                    "Chưa có Test Case nào chứa semantic target. Bộ 75 case mẫu hiện vẫn là manual placeholder; "
+                    "cần chuyển từng nhóm bước nghiệp vụ sang semantic action trước khi mapping có thể mở khóa."
+                )
+
+
 
 with tab_run:
     runner_configured = bool(os.getenv("RUNNER_URL", "").strip() and os.getenv("RUNNER_API_TOKEN", ""))
