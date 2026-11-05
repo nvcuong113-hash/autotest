@@ -1253,3 +1253,35 @@ def test_risk_ui_pilot_adds_as_separate_case_without_overwriting_original(tmp_pa
     assert cases["TC-021BE33A"]["automation_level"] == "manual"
     assert "Business risk setup" in cases["TC-021BE33A"]["steps_json"]
     assert cases["TC-021BE33A-UI-01"]["automation_level"] == "automatable"
+
+def test_risk_indicators_ui_smoke_case_has_valid_steps():
+    from core.pilot_cases import risk_indicators_ui_smoke_case
+    from core.test_generator import validate_steps_json
+
+    case = risk_indicators_ui_smoke_case()
+
+    assert case["case_key"] == "TC-021BE33A-UI-01"
+    assert case["req_key"] == "BG-REQ-RISK-01"
+    assert case["automation_level"] == "automatable"
+    assert validate_steps_json(case["steps"]) == case["steps"]
+    assert [
+        step["expected"] for step in case["steps"] if step["action"] == "expect_text"
+    ] == ["Tổng bảo lãnh", "Đã bồi thường", "Sắp hết hạn"]
+
+
+def test_app_imports_risk_indicators_ui_smoke_case_for_mapping_tab():
+    import ast
+    from pathlib import Path
+
+    app_tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
+    imports_pilot_case = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "core.pilot_cases"
+        and any(alias.name == "risk_indicators_ui_smoke_case" for alias in node.names)
+        for node in ast.walk(app_tree)
+    )
+
+    assert imports_pilot_case, (
+        "app.py calls risk_indicators_ui_smoke_case() in the Mapping tab "
+        "and must import it from core.pilot_cases."
+    )
