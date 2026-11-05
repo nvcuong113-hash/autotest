@@ -25,6 +25,7 @@ try:
     from core.automation_assessment import (
         assess_cases, assess_test_case, assessment_summary, build_mapping_coverage,
     )
+    from core.mapping_suggestions import build_mapping_suggestions
     from core.runner_client import inspect_page, run_suite
     from core.db import (
         add_test_cases, create_project, init_db, list_projects, list_requirements,
@@ -466,8 +467,179 @@ with tab_mapping:
     setup_tab, coverage_tab = st.tabs(["🛠 Thiết lập Mapping & Workflow", "📊 Coverage & Test Case bị chặn"])
 
     with setup_tab:
+            st.subheader("BƯỚC 1 — Chạy Inspector và lấy danh sách phần tử")
+            profile_pages = effective_profile.get("pages") or {}
+            profile_page_ids = list(profile_pages.keys())
+            if not profile_page_ids:
+                st.error("Application Profile chưa có Page. Cần khai báo route trước khi Inspector.")
+            else:
+                mapping_page_key = f"mapping_page_id_{pid}"
+                if mapping_page_key not in st.session_state:
+                    st.session_state[mapping_page_key] = profile_page_ids[0]
+                mapping_page_id = st.selectbox(
+                    "Màn hình nghiệp vụ cần mapping",
+                    profile_page_ids,
+                    format_func=lambda value: str(profile_pages.get(value, {}).get("name") or value),
+                    key=mapping_page_key,
+                )
+                mapping_page_path = str(profile_pages.get(mapping_page_id, {}).get("path") or "")
+                default_inspect_url = base_url.rstrip("/") + mapping_page_path
+                inspect_url_key = f"mapping_inspect_url_{pid}"
+                if inspect_url_key not in st.session_state:
+                    st.session_state[inspect_url_key] = default_inspect_url
+                mapping_inspect_url = st.text_input(
+                    "URL Staging cần đọc",
+                    key=inspect_url_key,
+                    help="Inspector chỉ đọc DOM, không gửi biểu mẫu nghiệp vụ hoặc thay đổi dữ liệu.",
+                )
+                map_login = st.checkbox(
+                    "Đăng nhập OAP Meta bằng tài khoản kiểm thử ở thanh bên",
+                    value=True,
+                    key=f"mapping_inspect_login_{pid}",
+                )
+                mapping_runner_configured = bool(
+                    os.getenv("RUNNER_URL", "").strip()
+                    and os.getenv("RUNNER_API_TOKEN", "")
+                )
+                if st.button(
+                    "🔎 Chạy Inspector và tạo đề xuất mapping",
+                    type="primary",
+                    disabled=not mapping_runner_configured,
+                    key=f"mapping_inspect_run_{pid}",
+                ):
+                    if not mapping_inspect_url.strip():
+                        st.error("Nhập URL Staging cần kiểm tra.")
+                    elif map_login and (not username.strip() or not password):
+                        st.error("Đã bật đăng nhập nhưng chưa có đủ tài khoản/mật khẩu kiểm thử ở thanh bên.")
+                    else:
+                        try:
+                            with st.spinner("Đang đăng nhập (nếu bật), chờ màn hình ổn định và đọc DOM..."):
+                                st.session_state[f"inspection_{pid}"] = inspect_page(
+                                    mapping_inspect_url,
+                                    base_url,
+                                    headless=True,
+                                    username=username,
+                                    password=password,
+                                    authenticate=map_login,
+                                    application_profile_id=application_profile_id,
+                                )
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Inspector thất bại: {type(exc).__name__}: {exc}")
+
+                mapping_inspection = st.session_state.get(f"inspection_{pid}") or {}
+                if mapping_inspection:
+                    auth_result = (mapping_inspection.get("login_diagnostic") or {}).get("result", "UNKNOWN")
+                    ready = bool(mapping_inspection.get("business_page_ready"))
+                    st.caption(
+                        f"URL đã đọc: {mapping_inspection.get('final_url','')} · "
+                        f"HTTP: {mapping_inspection.get('http_status','?')} · "
+                        f"Xác thực: {auth_result} · "
+                        f"Inputs: {len(mapping_inspection.get('inputs', []))} · "
+                        f"Buttons: {len(mapping_inspection.get('buttons', []))}"
+                    )
+                    if auth_result == "AUTHENTICATED" and ready:
+                        st.success("Đã đọc được màn hình nghiệp vụ sau đăng nhập. Có thể tạo mapping nháp từ DOM.")
+                    elif auth_result == "AUTHENTICATED":
+                        st.warning("Đã xác thực nhưng màn hình nghiệp vụ chưa được Inspector xác nhận ổn định. Rà soát kết quả trước khi mapping.")
+                    else:
+                        st.warning("Chưa xác nhận được phiên đăng nhập. Không nên tạo mapping cho màn hình Login hoặc trang chưa xác thực.")
+
+                    if mapping_inspection.get("final_url") and mapping_inspection.get("final_url", "").startswith(base_url.rstrip("/") + "/login"):
+                        st.error("Inspector đang đứng ở trang đăng nhập, không phải màn hình Bảo lãnh. Không tạo mapping từ kết quả này.")
+                    else:
+                        suggestion_rows = build_mapping_suggestions(mapping_inspection, mapping_page_id)
+                        if suggestion_rows:
+                            st.subheader("BƯỚC 2 — Rà soát và lưu mapping hàng loạt")
+                            st.caption(
+                                f"Inspector quan sát được {len(suggestion_rows)} phần tử có locator gợi ý. "
+                                "Target ID được đặt tên từ thuộc tính DOM thực tế; không gọi AI và không tự xác minh selector."
+                            )
+                            suggestion_df = pd.DataFrame(suggestion_rows)
+                            inspector_signature = str(hash(json.dumps({
+                                "url": mapping_inspection.get("final_url"),
+                                "inputs": mapping_inspection.get("inputs", []),
+                                "buttons": mapping_inspection.get("buttons", []),
+                                "page": mapping_page_id,
+                            }, ensure_ascii=False, sort_keys=True)))
+                            suggestion_editor = st.data_editor(
+                                suggestion_df,
+                                use_container_width=True,
+                                hide_index=True,
+                                num_rows="fixed",
+                                key=f"bulk_mapping_editor_{pid}_{inspector_signature}",
+                                column_config={
+                                    "include": st.column_config.CheckboxColumn("Lưu", default=True),
+                                    "target_id": st.column_config.TextColumn("Semantic target ID", required=True),
+                                    "element_type": st.column_config.TextColumn("Loại", disabled=True),
+                                    "element_label": st.column_config.TextColumn("Phần tử DOM quan sát được", disabled=True),
+                                    "locator_by": st.column_config.SelectboxColumn(
+                                        "Strategy", options=["css", "role", "label", "placeholder", "text"], required=True
+                                    ),
+                                    "locator_value": st.column_config.TextColumn("Locator", required=True),
+                                    "locator_name": st.column_config.TextColumn("Tên accessible (role)"),
+                                    "verified": st.column_config.CheckboxColumn("Đã kiểm tra thủ công", default=False),
+                                    "evidence": st.column_config.TextColumn("Bằng chứng Inspector", disabled=True),
+                                },
+                            )
+                            st.caption(
+                                "Các dòng mặc định CHƯA XÁC MINH. Chỉ tích 'Đã kiểm tra thủ công' với từng dòng "
+                                "sau khi đã đối chiếu locator trên đúng màn hình Staging."
+                            )
+                            if st.button(
+                                "💾 Lưu các mapping đã chọn",
+                                type="primary",
+                                key=f"save_bulk_mappings_{pid}_{inspector_signature}",
+                            ):
+                                try:
+                                    chosen_rows = suggestion_editor.to_dict("records")
+                                    selected_rows = [row for row in chosen_rows if bool(row.get("include"))]
+                                    payload_rows = []
+                                    for row in selected_rows:
+                                        target_value = str(row.get("target_id") or "").strip()
+                                        locator_value = str(row.get("locator_value") or "").strip()
+                                        if not target_value or not locator_value:
+                                            raise ValueError("Mỗi mapping được chọn phải có Semantic target ID và Locator.")
+                                        if target_value.startswith("auth."):
+                                            raise ValueError("Không dùng công cụ mapping nghiệp vụ để ghi đè target xác thực.")
+                                        payload_rows.append({
+                                            "page_id": mapping_page_id,
+                                            "target_id": target_value,
+                                            "locator_by": str(row.get("locator_by") or ""),
+                                            "locator_value": locator_value,
+                                            "locator_name": str(row.get("locator_name") or ""),
+                                            "exact": True,
+                                            "verified": bool(row.get("verified")),
+                                            "evidence": str(row.get("evidence") or ""),
+                                        })
+                                    if not payload_rows:
+                                        raise ValueError("Chưa chọn dòng mapping nào để lưu.")
+                                    saved = save_application_mappings(pid, application_profile_id, payload_rows)
+                                    verified_count = sum(bool(item["verified"]) for item in payload_rows)
+                                    st.success(
+                                        f"Đã lưu {saved} mapping cho màn hình {mapping_page_id}: "
+                                        f"{verified_count} đã xác minh, {saved - verified_count} đang chờ xác minh."
+                                    )
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(f"Không thể lưu mapping hàng loạt: {type(exc).__name__}: {exc}")
+                        else:
+                            st.warning(
+                                "Inspector chưa tìm thấy phần tử có locator quan sát được. "
+                                "Kiểm tra lại đăng nhập, trạng thái màn hình hoặc selector trong kết quả Inspector."
+                            )
+                else:
+                    st.info(
+                        "Chưa có dữ liệu Inspector cho dự án này. Chọn màn hình ở trên và nhấn "
+                        "'Chạy Inspector và tạo đề xuất mapping'."
+                    )
+
             st.divider()
-            st.subheader("Tạo / cập nhật mapping dùng chung")
+            st.subheader("Mapping nâng cao — tạo / cập nhật một target")
+            st.caption(
+                "Dùng khi cần khai báo thủ công hoặc chỉnh sửa một target cụ thể. "
+                "Nên ưu tiên bảng mapping hàng loạt từ Inspector ở bước trên."
+            )
             st.caption(
                 "Chọn target đã được Test Case tham chiếu hoặc tạo target mới. Mapping lưu ở cấp dự án + Application Profile; "
                 "chỉ đánh dấu xác minh sau khi đã kiểm tra locator trên đúng màn hình Staging."
@@ -476,14 +648,16 @@ with tab_mapping:
             if not page_ids:
                 st.warning("Application Profile chưa khai báo page nghiệp vụ.")
             else:
-                page_options = [""] + page_ids
+                page_options = page_ids + [""]
                 target_refs = [item for item in coverage if item["target_id"]]
                 target_choice_options = ["Tạo target mới"] + [
                     f"{item['page_id']} :: {item['target_id']}" for item in target_refs
                 ]
                 target_choice_key = f"map_target_choice_{pid}"
                 target_id_key = f"map_target_id_{pid}"
-                page_key = f"map_page_{pid}"
+                page_key = f"map_page_v2_{pid}"
+                if page_key not in st.session_state and page_ids:
+                    st.session_state[page_key] = page_ids[0]
 
                 def _sync_mapping_target_choice():
                     choice = st.session_state.get(target_choice_key, "Tạo target mới")
