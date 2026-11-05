@@ -1117,3 +1117,82 @@ def test_shared_component_mapping_can_be_reused_across_pages():
         },
     ]
     assert [assess_test_case(case, profile)["status"] for case in cases] == ["READY", "READY"]
+
+
+def test_inspector_mapping_suggestions_are_deterministic_and_unverified():
+    from core.mapping_suggestions import build_mapping_suggestions
+
+    inspection = {
+        "final_url": "https://staging.example.test/app/guarantees",
+        "inputs": [
+            {
+                "index": 0, "tag": "input", "type": "text",
+                "id": "keyword", "name": "f_keyword",
+                "placeholder": "Số BL, beneficiary",
+                "aria_label": "", "labels": ["Từ khóa"],
+                "suggested_selector": "input#keyword", "disabled": False,
+            },
+            {
+                "index": 1, "tag": "input", "type": "password",
+                "id": "password", "name": "password",
+                "suggested_selector": "input#password", "disabled": False,
+            },
+            {
+                "index": 2, "tag": "select", "type": "select",
+                "id": "", "name": "", "placeholder": "",
+                "aria_label": "Trạng thái", "labels": [],
+                "suggested_selector": "select[aria-label='Trạng thái']", "disabled": False,
+            },
+            {
+                "index": 3, "tag": "input", "type": "hidden",
+                "id": "csrf", "name": "csrf", "suggested_selector": "input#csrf",
+                "disabled": False,
+            },
+        ],
+        "buttons": [
+            {
+                "index": 0, "tag": "button", "text": "Tìm kiếm",
+                "aria_label": "", "title": "", "type": "button",
+                "disabled": False, "suggested_selector": "",
+            },
+            {
+                "index": 1, "tag": "button", "text": "Xóa",
+                "aria_label": "", "title": "", "type": "button",
+                "disabled": True, "suggested_selector": "",
+            },
+        ],
+    }
+
+    first = build_mapping_suggestions(inspection, "ccm.guarantee.list")
+    second = build_mapping_suggestions(inspection, "ccm.guarantee.list")
+
+    assert first == second
+    assert len(first) == 3
+    assert all(row["verified"] is False for row in first)
+    assert all(row["target_id"].startswith("ccm.guarantee.list.") for row in first)
+    assert all(not row["target_id"].startswith("auth.") for row in first)
+    assert first[0]["locator_by"] == "css"
+    assert first[1]["locator_by"] == "css"
+    assert first[2]["locator_by"] == "role"
+    assert first[2]["locator_value"] == "button"
+    assert first[2]["locator_name"] == "Tìm kiếm"
+
+
+def test_inspector_mapping_suggestions_skip_elements_without_grounded_locator():
+    from core.mapping_suggestions import build_mapping_suggestions
+
+    inspection = {
+        "final_url": "https://staging.example.test/app/guarantees",
+        "inputs": [{
+            "index": 0, "tag": "input", "type": "text",
+            "id": "", "name": "", "placeholder": "",
+            "aria_label": "", "labels": [],
+            "suggested_selector": "", "disabled": False,
+        }],
+        "buttons": [{
+            "index": 0, "tag": "button", "text": "",
+            "aria_label": "", "title": "", "type": "button",
+            "disabled": False, "suggested_selector": "",
+        }],
+    }
+    assert build_mapping_suggestions(inspection, "ccm.guarantee.list") == []
